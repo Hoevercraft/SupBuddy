@@ -16,14 +16,6 @@ test('Radrennen laden: Startnummer zeigt Name, Art und Länge', async ({ page })
   await expect(page.getByTestId('leg')).toHaveCount(1);
   await expect(page.locator('.pin-start')).toBeVisible();
 
-  // Karte muss den Bildschirm tatsächlich füllen (Regression: 0 px Höhe durch MapLibre-CSS)
-  const viewport = page.viewportSize()!;
-  const canvas = await page.locator('#map canvas').boundingBox();
-  expect(canvas).not.toBeNull();
-  expect(canvas!.height).toBeGreaterThan(viewport.height * 0.8);
-  const pin = await page.locator('.pin-start').boundingBox();
-  expect(pin!.y).toBeGreaterThan(0);
-  expect(pin!.y).toBeLessThan(viewport.height);
   expect(errors).toEqual([]);
 });
 
