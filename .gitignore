@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dev-dist/
+test-results/
+playwright-report/
+.DS_Store
+*.log
+# Capacitor (später)
+ios/App/Pods/
+android/.gradle/
+android/app/build/
