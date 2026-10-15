@@ -1,5 +1,24 @@
 import { defineConfig } from 'vite';
+import { execSync } from 'node:child_process';
 import { VitePWA } from 'vite-plugin-pwa';
+
+/** Kurze Commit-Kennung: in GitHub Actions aus GITHUB_SHA, lokal aus git, sonst "dev". */
+function commitId(): string {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short=7 HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return 'dev';
+  }
+}
+
+const buildTime = new Date().toLocaleString('de-DE', {
+  timeZone: 'Europe/Berlin',
+  day: '2-digit',
+  month: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
 
 // BASE_PATH wird im GitHub-Pages-Workflow auf "/SupBuddy/" gesetzt.
 // Lokal und später für Capacitor (iOS/Android) bleibt es "/".
@@ -9,6 +28,8 @@ export default defineConfig({
   base,
   define: {
     __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0'),
+    __APP_COMMIT__: JSON.stringify(commitId()),
+    __APP_BUILD_TIME__: JSON.stringify(buildTime.replace(',', '')),
   },
   build: {
     outDir: 'dist',

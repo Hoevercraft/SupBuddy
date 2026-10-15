@@ -47,7 +47,8 @@ export class CourseMap {
       style: STYLE_URL,
       center: GERMANY_CENTER,
       zoom: 5,
-      attributionControl: { compact: true },
+      // Quellenhinweis oben rechts: unten verdeckt ihn auf dem Handy das Panel
+      attributionControl: false,
       dragRotate: false,
       pitchWithRotate: false,
     });
@@ -71,6 +72,11 @@ export class CourseMap {
       showAccuracyCircle: true,
     });
     this.map.addControl(this.geolocate, 'top-right');
+    this.map.addControl(new maplibregl.AttributionControl({
+        compact: true,
+        // Immer sichtbar, auch wenn nur der Ersatzstil geladen ist
+        customAttribution: '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>',
+      }), 'top-right');
     this.geolocate.on('geolocate', (pos: GeolocationPosition) =>
       onPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
     );

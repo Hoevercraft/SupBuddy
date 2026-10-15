@@ -263,13 +263,13 @@ html, body {
 
 .version {
   position: absolute;
-  right: 6px;
-  bottom: 2px;
-  font-size: 10px;
+  right: 8px;
+  bottom: calc(var(--safe-bottom) + 3px);
+  z-index: 5;
+  font: 11px/1.2 var(--font-body);
+  font-variant-numeric: tabular-nums;
   color: var(--ink-soft);
-  opacity: 0.6;
   pointer-events: none;
-  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -60,6 +60,8 @@ test('Bedienelemente sind sichtbar und nicht verdeckt', async ({ page }) => {
   await expectOnScreen(page.locator('#event-name'));
   await expectOnScreen(page.getByTestId('total-distance'));
   await expectOnScreen(page.locator('.maplibregl-ctrl-geolocate'), 24);
+  // Quellenhinweis der Karte (OpenStreetMap) muss sichtbar sein
+  await expectOnScreen(page.locator('.maplibregl-ctrl-attrib'), 16);
   await expectOnScreen(page.locator('.pin-start'));
   await expectOnScreen(page.locator('.pin-finish'));
   await expectOnScreen(page.getByRole('button', { name: 'Link teilen' }), 40);
