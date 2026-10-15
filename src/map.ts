@@ -93,7 +93,11 @@ export class CourseMap {
       attributionControl: false,
       dragRotate: false,
       pitchWithRotate: false,
+      // Bild nach dem Zeichnen behalten: Screenshots (Tests, Teilen) zeigen dann genau das Angezeigte
+      canvasContextAttributes: { preserveDrawingBuffer: true },
     });
+    // Zustand für Fehlersuche und Tests abrufbar machen
+    (window as unknown as { __supbuddyMap?: () => unknown }).__supbuddyMap = () => this.debugState();
     this.map.touchZoomRotate.disableRotation();
 
     this.map.on('error', (e) => {
@@ -149,6 +153,22 @@ export class CourseMap {
     const b = bounds(all);
     if (!b) return;
     this.map.fitBounds(b, { padding: { top: 100, bottom: 260, left: 40, right: 60 }, maxZoom: 15, duration: 0 });
+  }
+
+  /** Kurzbericht zum Kartenzustand (für Tests und Fehlersuche). */
+  debugState() {
+    const src = this.map.getSource('course') as GeoJSONSource | undefined;
+    const canvas = this.map.getCanvas();
+    return {
+      styleLoaded: this.map.isStyleLoaded(),
+      usingFallback: this.usingFallback,
+      hasCourseSource: !!src,
+      hasCourseLayer: !!this.map.getLayer('course-line'),
+      legs: this.event?.legs.length ?? 0,
+      zoom: Math.round(this.map.getZoom() * 10) / 10,
+      canvas: `${canvas.width}x${canvas.height}`,
+      loaded: this.map.loaded(),
+    };
   }
 
   private addCourseLayers(): void {

@@ -35,12 +35,15 @@ test('Karte füllt den Bildschirm und zeichnet die Strecke', async ({ page }) =>
   expect(canvas!.width).toBeGreaterThan(vp.width * 0.8);
 
   // Und auf dem Bild müssen wirklich orange Streckenpixel zu sehen sein
-  await expect
-    .poll(async () => countColorPixels(page, RAD, await freeMapArea(page)), {
-      message: 'Strecke ist auf der Karte nicht zu sehen',
-      timeout: 10_000,
-    })
-    .toBeGreaterThan(300);
+  let pixels = 0;
+  try {
+    await expect
+      .poll(async () => (pixels = await countColorPixels(page, RAD, await freeMapArea(page))), { timeout: 10_000 })
+      .toBeGreaterThan(300);
+  } catch {
+    const state = await page.evaluate(() => (window as unknown as { __supbuddyMap?: () => unknown }).__supbuddyMap?.());
+    throw new Error(`Strecke ist auf der Karte nicht zu sehen (${pixels} Pixel). Kartenzustand: ${JSON.stringify(state)}`);
+  }
 });
 
 test('Ohne Strecke ist auf der Karte nichts Oranges', async ({ page }) => {
