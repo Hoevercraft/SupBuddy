@@ -67,7 +67,10 @@ test('Strecke bleibt nach dem Neuladen erhalten', async ({ page }) => {
 test('Teilen-Link öffnet dieselbe Strecke auf einem anderen Gerät', async ({ page, browser }) => {
   await openApp(page);
   await page.locator('#file-input').setInputFiles(fixture('triathlon.gpx'));
+  // Erst warten, bis die Strecke wirklich geladen ist (sonst Wettlauf, v. a. auf WebKit)
+  await expect(page.getByTestId('leg')).toHaveCount(3);
   const before = await page.getByTestId('total-distance').textContent();
+  expect(before).toMatch(/km/);
 
   await page.getByRole('button', { name: 'Link teilen' }).click();
   const link = await page.getByTestId('share-link').inputValue();
