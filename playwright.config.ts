@@ -7,7 +7,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? 'github' : 'list',
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: 'http://localhost:4173',
     trace: 'retain-on-failure',
@@ -17,6 +17,8 @@ export default defineConfig({
   projects: [
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
+    // Jan und die meisten Supporter nutzen iPhones → WebKit (Safari-Engine) muss mitlaufen
+    { name: 'iphone', use: { ...devices['iPhone 14'], launchOptions: {} } },
   ],
   webServer: {
     command: 'npm run build && npm run preview',

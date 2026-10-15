@@ -9,7 +9,7 @@
     "preview": "vite preview --port 4173 --strictPort",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
-    "test:install": "playwright install --with-deps chromium"
+    "test:install": "playwright install --with-deps chromium webkit"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.1.0",
