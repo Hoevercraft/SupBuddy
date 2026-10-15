@@ -11,6 +11,8 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:4173',
     trace: 'retain-on-failure',
+    // WebGL für MapLibre im Headless-Browser (Software-Rendering)
+    launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] },
   },
   projects: [
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
