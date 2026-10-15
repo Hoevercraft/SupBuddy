@@ -12,6 +12,8 @@ import { decodeEvent, normalizeLeg, shareUrl, tokenFromHash } from './share';
 import { loadEvent, saveEvent } from './store';
 
 export const APP_VERSION = __APP_VERSION__;
+/** Zum Troubleshooting: ändert sich mit jedem Deploy. */
+export const BUILD_LABEL = `v${__APP_VERSION__} · ${__APP_COMMIT__} · ${__APP_BUILD_TIME__}`;
 
 // ---------------------------------------------------------------- Zustand
 
@@ -80,7 +82,7 @@ function shell(root: HTMLElement): void {
     </dialog>
 
     <div class="toast" id="toast" role="status" hidden></div>
-    <small class="version" data-testid="version">v${APP_VERSION}</small>
+    <small class="version" data-testid="version">${BUILD_LABEL}</small>
   `;
 }
 
