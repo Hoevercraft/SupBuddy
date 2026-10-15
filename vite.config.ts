@@ -21,14 +21,14 @@ export default defineConfig({
       manifest: {
         name: 'SupBuddy',
         short_name: 'SupBuddy',
-        description: 'SupBuddy',
+        description: 'Rennstrecke, eigener Standort und die besten Stellen zum Anfeuern.',
         lang: 'de',
         start_url: '.',
         scope: '.',
         display: 'standalone',
         orientation: 'portrait',
-        background_color: '#0b1d2a',
-        theme_color: '#0b1d2a',
+        background_color: '#FBFCFD',
+        theme_color: '#FFD23F',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -36,7 +36,9 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest,woff2}'],
+        // MapLibre ist groß; ohne höheres Limit fehlt es im Offline-Cache
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
     }),
   ],
