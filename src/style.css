@@ -50,7 +50,10 @@ html, body {
   color: var(--ink-soft);
 }
 
-.maplibregl-ctrl-top-right { top: calc(var(--safe-top) + 112px); }
+.maplibregl-ctrl-top-right { top: var(--safe-top); }
+
+body:not(.has-event) .ctrl-maponly { display: none; }
+.ctrl-maponly-btn { display: grid; place-items: center; color: var(--ink); }
 
 .pin {
   font: 700 13px/1 var(--font-sign);
@@ -68,30 +71,30 @@ html, body {
 
 .bib {
   position: absolute;
-  top: calc(var(--safe-top) + 12px);
+  top: calc(var(--safe-top) + 10px);
   left: var(--gutter);
-  right: var(--gutter);
-  max-width: 520px;
-  padding: 10px 14px 10px;
+  right: calc(var(--gutter) + 44px); /* Platz für die Kartenknöpfe */
+  max-width: 440px;
+  padding: 5px 10px 6px 20px;
   background: var(--bib);
   color: var(--ink);
-  border-radius: 6px;
-  box-shadow: 0 2px 0 var(--ink);
-  border: 2px solid var(--ink);
-  /* Löcher für die Sicherheitsnadeln */
+  border-radius: 5px;
+  border: 1.5px solid var(--ink);
+  /* Zwei kleine Löcher für die Sicherheitsnadeln */
   background-image:
-    radial-gradient(circle at 10px 10px, var(--ink) 3px, transparent 3.5px),
-    radial-gradient(circle at calc(100% - 10px) 10px, var(--ink) 3px, transparent 3.5px);
+    radial-gradient(circle at 9px 10px, var(--ink) 2.2px, transparent 2.7px),
+    radial-gradient(circle at 9px calc(100% - 10px), var(--ink) 2.2px, transparent 2.7px);
+  transition: transform 0.2s ease, opacity 0.2s ease, visibility 0s;
 }
 
 .bib-name {
   width: 100%;
   border: 0;
   background: transparent;
-  font: 800 30px/1.05 var(--font-sign);
+  font: 800 21px/1.15 var(--font-sign);
   color: var(--ink);
-  padding: 2px 10px;
-  border-radius: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
   text-overflow: ellipsis;
 }
 .bib-name:focus-visible { outline: 2px solid var(--ink); background: rgb(255 255 255 / 0.35); }
@@ -100,14 +103,14 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 12px;
-  padding: 0 10px;
+  gap: 10px;
+  padding: 0 4px;
 }
 
-.bib-kind { font: 600 17px/1.2 var(--font-sign); }
+.bib-kind { font: 600 14px/1.2 var(--font-sign); }
 
-.bib-stats { display: flex; gap: 12px; align-items: baseline; font: 600 17px/1.2 var(--font-sign); }
-.bib-stats strong { font: 800 26px/1 var(--font-sign); }
+.bib-stats { display: flex; gap: 10px; align-items: baseline; font: 600 14px/1.2 var(--font-sign); }
+.bib-stats strong { font: 800 18px/1 var(--font-sign); }
 
 /* ---------------------------------------------------------------- Panel unten */
 
@@ -276,4 +279,19 @@ html, body {
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+}
+
+/* ---------------------------------------------------------------- Vollbild-Karte */
+
+.sheet { transition: transform 0.2s ease, visibility 0s; }
+
+.map-only .bib {
+  transform: translateY(calc(-100% - 12px - var(--safe-top)));
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0s 0.2s;
+}
+.map-only .sheet {
+  transform: translateY(calc(100% + 20px));
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0s 0.2s;
 }
