@@ -37,9 +37,7 @@ html, body {
 
 /* ---------------------------------------------------------------- Karte */
 
-/* ID-Selektor, damit MapLibres eigenes CSS (.maplibregl-map { position: relative })
-   die Vollbild-Karte nicht auf 0 px Höhe zusammenschiebt */
-#map.map { position: absolute; inset: 0; background: #e9eef2; }
+.map { position: absolute; inset: 0; background: #e9eef2; }
 
 .map-error {
   position: absolute;
