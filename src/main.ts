@@ -4,7 +4,9 @@ import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/800.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
+import { athleteDialogHtml, athletesNow, athletesSection, initials, openAthleteDialog, readAthleteForm } from './athletes-ui';
 import { courseStats, legDistance, nearestOnCourse } from './course';
+import { isoDate } from './format';
 import { formatDistance, formatKm } from './geo';
 import { GpxError, parseGpx } from './gpx';
 import { DISCIPLINES, eventKind, type Discipline, type Point, type RaceEvent } from './model';
@@ -82,6 +84,8 @@ function shell(root: HTMLElement): void {
       </form>
     </dialog>
 
+    ${athleteDialogHtml()}
+
     <div class="toast" id="toast" role="status" hidden></div>
     <small class="version" data-testid="version">${BUILD_LABEL}</small>
   `;
@@ -152,6 +156,8 @@ function renderSheet(): void {
 
   sheet.innerHTML = `
     ${positionText()}
+    ${athletesSection(event, position, Date.now())}
+    <h3 class="sheet-sub">Strecke</h3>
     <ul class="legs">${legs}</ul>
     <div class="actions">
       <button class="btn btn-primary" id="btn-share" type="button">Link teilen</button>
@@ -168,12 +174,35 @@ function setMapOnly(on: boolean): void {
   courseMap?.setMapOnly(mapOnly);
 }
 
+/** Athleten-Marker an ihre Plan-Position setzen. */
+function renderAthleteMarkers(): void {
+  const items = event
+    ? athletesNow(event, Date.now()).map(({ athlete, plan }) => ({
+        label: initials(athlete.name),
+        name: athlete.name,
+        color: athlete.color,
+        point: plan.state === 'unterwegs' ? plan.point : null,
+      }))
+    : [];
+  courseMap?.setAthletes(items);
+}
+
 function render(fit = false): void {
   document.body.classList.toggle('has-event', !!event);
   if (!event && mapOnly) setMapOnly(false);
   renderBib();
   renderSheet();
   courseMap?.setEvent(event, fit);
+  renderAthleteMarkers();
+}
+
+/** Plan-Positionen laufen mit der Uhr: regelmäßig auffrischen, ohne laufende Eingaben zu stören. */
+function tick(): void {
+  if (!event || event.athletes.length === 0) return;
+  renderAthleteMarkers();
+  const sheet = $('#sheet');
+  const busy = sheet.contains(document.activeElement) && document.activeElement !== document.body;
+  if (!busy && !$<HTMLDialogElement>('#athlete-dialog').open) renderSheet();
 }
 
 async function setEvent(ev: RaceEvent | null, fit = true): Promise<void> {
@@ -191,7 +220,7 @@ async function importFiles(files: FileList): Promise<void> {
   for (const file of Array.from(files)) {
     try {
       const parsed = parseGpx(await file.text(), file.name);
-      if (!next) next = { name: parsed.name ?? (file.name.replace(/\.gpx$/i, '') || 'Mein Rennen'), legs: [] };
+      if (!next) next = { name: parsed.name ?? (file.name.replace(/\.gpx$/i, '') || 'Mein Rennen'), legs: [], date: null, athletes: [] };
       // Gleiche Vereinfachung wie im Teilen-Link → Sender und Empfänger sehen dieselben Zahlen
       next.legs.push(...parsed.legs.map(normalizeLeg));
       added += parsed.legs.length;
@@ -228,6 +257,11 @@ function bindEvents(): void {
     if (t.closest('#btn-load')) fileInput.click();
     else if (t.closest('#btn-share')) await openShare();
     else if (t.closest('#btn-locate')) courseMap?.locate();
+    else if (t.closest('#btn-add-athlete') && event) openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, null);
+    else if (t.closest('.athlete-edit') && event) {
+      const i = Number((t.closest('.athlete-edit') as HTMLElement).dataset.index);
+      openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, i);
+    }
     else if (t.closest('#btn-reset')) {
       if (confirm('Aktuelle Strecke verwerfen und ein anderes Rennen laden?')) await setEvent(null);
     } else if (t.closest('.leg-remove') && event) {
@@ -238,6 +272,10 @@ function bindEvents(): void {
 
   $('#sheet').addEventListener('change', async (e) => {
     const t = e.target as HTMLElement;
+    if (t instanceof HTMLInputElement && t.id === 'race-date' && event) {
+      await setEvent({ ...event, date: /^\d{4}-\d{2}-\d{2}$/.test(t.value) ? t.value : null }, false);
+      return;
+    }
     if (t instanceof HTMLSelectElement && t.classList.contains('leg-discipline') && event) {
       const i = Number(t.dataset.index);
       const legs = event.legs.map((l, j) => (j === i ? { ...l, discipline: t.value as Discipline } : l));
@@ -273,6 +311,38 @@ function bindEvents(): void {
     } catch {
       // Abgebrochen
     }
+  });
+
+  // Athleten-Dialog
+  const athleteDialog = $<HTMLDialogElement>('#athlete-dialog');
+  const athleteForm = $<HTMLFormElement>('#athlete-form');
+  const athleteError = $('#athlete-error');
+  athleteForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!event) return;
+    const result = readAthleteForm(athleteDialog);
+    if (typeof result === 'string') {
+      athleteError.textContent = result;
+      athleteError.hidden = false;
+      return;
+    }
+    const idx = athleteDialog.dataset.index;
+    const athletes = [...event.athletes];
+    if (idx) athletes[Number(idx)] = result;
+    else athletes.push(result);
+    athleteDialog.close();
+    // Beim ersten Athleten den Renntag festhalten, damit der Teilen-Link ihn mitnimmt
+    await setEvent({ ...event, athletes, date: event.date ?? isoDate(new Date()) }, false);
+    toast(idx ? `${result.name} gespeichert.` : `${result.name} hinzugefügt.`);
+  });
+  $('#athlete-cancel').addEventListener('click', () => athleteDialog.close());
+  $('#athlete-delete').addEventListener('click', async () => {
+    const idx = athleteDialog.dataset.index;
+    if (!event || !idx) return;
+    const name = event.athletes[Number(idx)].name;
+    athleteDialog.close();
+    await setEvent({ ...event, athletes: event.athletes.filter((_, j) => j !== Number(idx)) }, false);
+    toast(`${name} entfernt.`);
   });
 
   window.addEventListener('hashchange', () => void loadFromHash());
@@ -323,4 +393,5 @@ async function start(): Promise<void> {
 }
 
 void start();
+window.setInterval(tick, 15_000);
 registerSW({ immediate: true });

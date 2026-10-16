@@ -1,5 +1,5 @@
 import { simplify } from './geo';
-import { DISCIPLINES, type Discipline, type Leg, type Point, type RaceEvent } from './model';
+import { DISCIPLINES, type Athlete, type Discipline, type Leg, type Point, type RaceEvent } from './model';
 
 /*
  * Ein Event wird komplett in den Link gepackt (Hash-Teil, wird nie an einen Server gesendet):
@@ -63,10 +63,59 @@ interface WireLeg {
   /** Höhenmeter */
   g?: number;
 }
+interface WireAthlete {
+  n: string;
+  c: string;
+  /** Start "HH:MM" */
+  s: string;
+  /** Pace: [s/100 m Schwimmen, km/h×10 Rad, s/km Lauf] */
+  p: [number, number, number];
+  /** Wechsel in s */
+  w: number;
+}
 interface WireEvent {
   v: number;
   n: string;
   l: WireLeg[];
+  /** Renntag (optional) */
+  d?: string;
+  /** Athleten (optional; ältere Links haben keine) */
+  a?: WireAthlete[];
+}
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+function athleteToWire(a: Athlete): WireAthlete {
+  return {
+    n: a.name,
+    c: a.color,
+    s: a.start,
+    p: [Math.round(a.pace.schwimmen), Math.round(a.pace.rad * 10), Math.round(a.pace.lauf)],
+    w: Math.round(a.transition),
+  };
+}
+
+function athleteFromWire(w: WireAthlete): Athlete {
+  const ok =
+    w &&
+    typeof w.n === 'string' &&
+    COLOR_RE.test(w.c) &&
+    TIME_RE.test(w.s) &&
+    Array.isArray(w.p) &&
+    w.p.length === 3 &&
+    w.p.every((x) => Number.isFinite(x) && x > 0) &&
+    Number.isFinite(w.w) &&
+    w.w >= 0;
+  if (!ok) throw new Error('Athlet im Link ist beschädigt');
+  return {
+    name: w.n.slice(0, 40),
+    color: w.c,
+    start: w.s,
+    pace: { schwimmen: w.p[0], rad: w.p[1] / 10, lauf: w.p[2] },
+    transition: w.w,
+  };
 }
 
 function legToWire(leg: Leg): WireLeg {
@@ -102,7 +151,10 @@ export function normalizeLeg(leg: Leg): Leg {
 }
 
 export function eventToWire(ev: RaceEvent): WireEvent {
-  return { v: FORMAT_VERSION, n: ev.name, l: ev.legs.map(legToWire) };
+  const wire: WireEvent = { v: FORMAT_VERSION, n: ev.name, l: ev.legs.map(legToWire) };
+  if (ev.date) wire.d = ev.date;
+  if (ev.athletes.length) wire.a = ev.athletes.map(athleteToWire);
+  return wire;
 }
 
 export function eventFromWire(data: unknown): RaceEvent {
@@ -110,7 +162,12 @@ export function eventFromWire(data: unknown): RaceEvent {
   if (!w || typeof w !== 'object' || w.v !== FORMAT_VERSION || !Array.isArray(w.l)) {
     throw new Error('Unbekanntes oder beschädigtes Event-Format');
   }
-  return { name: typeof w.n === 'string' ? w.n : 'Rennen', legs: w.l.map(legFromWire) };
+  return {
+    name: typeof w.n === 'string' ? w.n : 'Rennen',
+    legs: w.l.map(legFromWire),
+    date: typeof w.d === 'string' && DATE_RE.test(w.d) ? w.d : null,
+    athletes: Array.isArray(w.a) ? w.a.map(athleteFromWire) : [],
+  };
 }
 
 // ---------- Kompression + Base64url ----------
