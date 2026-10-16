@@ -497,3 +497,30 @@ body:not(.has-event) .ctrl-maponly { display: none; }
 .stop-via { font-size: 13px; color: var(--ink-soft); margin: 0 0 6px !important; }
 
 .stop-cross { font-size: 14px; font-weight: 600; color: var(--danger); margin: 2px 0; }
+
+/* Kleine Karte am angetippten Streckenpunkt */
+.pick-popup .maplibregl-popup-content {
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--ink);
+  box-shadow: 0 6px 18px rgb(20 33 61 / 0.18);
+  font: 15px/1.35 var(--font-body);
+  color: var(--ink);
+}
+.pick-popup .maplibregl-popup-close-button { font-size: 22px; width: 32px; height: 32px; color: var(--ink-soft); }
+.pick { display: grid; gap: 6px; min-width: 210px; }
+.pick-title { font: 800 18px/1.1 var(--font-sign); padding-right: 24px; text-transform: uppercase; letter-spacing: 0.02em; }
+.pick-athletes { list-style: none; margin: 0; padding: 0; }
+.pick-athletes li { padding-left: 8px; border-left: 3px solid var(--athlete-color); margin: 2px 0; }
+.pick-athletes li.main { font-weight: 600; }
+.pick-athletes li.missed { color: var(--ink-soft); border-left-style: dotted; }
+.pick-athletes .ok { color: #1b7a3a; }
+.pick-athletes .late { color: var(--danger); }
+.pick-hint { margin: 0; color: var(--ink-soft); font-size: 14px; }
+.pick-way { margin: 0; font-weight: 600; }
+.pick .stop-cross { margin: 0; font-size: 13px; }
+.pick-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.pick .seg { margin: 2px 0; }
+.seg-small .seg-btn { min-height: 32px; font-size: 14px; padding: 0 8px; }
+.pick-go { justify-content: center; }
+.pick-tip { margin-top: 10px; }

@@ -1,6 +1,7 @@
 import type { FeatureCollection } from 'geojson';
 import maplibregl, { type GeoJSONSource, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { nearestOnCourse, type CourseNearest } from './course';
 import { bounds, haversine } from './geo';
 import { DISCIPLINES, type Point, type RaceEvent } from './model';
 
@@ -171,6 +172,10 @@ export interface CourseMapOptions {
   onToggleMapOnly: () => void;
   /** Frei sichtbarer Kartenbereich (Startnummer oben, Panel unten abziehen). */
   getPadding: () => Padding;
+  /** Tipp auf die Strecke (auf die Strecke eingerastet). */
+  onCoursePick?: (n: CourseNearest) => void;
+  /** Kartenhinweis am angetippten Punkt wurde geschlossen. */
+  onPickClose?: () => void;
 }
 
 export class CourseMap {
@@ -186,11 +191,15 @@ export class CourseMap {
   private athletePins = new Map<string, maplibregl.Marker>();
   private stopPins: maplibregl.Marker[] = [];
   private planGeoJSON: FeatureCollection = { type: 'FeatureCollection', features: [] };
+  private pickGeoJSON: FeatureCollection = { type: 'FeatureCollection', features: [] };
+  private pickPopup: maplibregl.Popup | null = null;
+  private onPickClose?: () => void;
   private usingFallback = false;
   private contextLost = 0;
   private mapOnlyToggle: MapOnlyToggle;
 
-  constructor(container: HTMLElement, { onPosition, onToggleMapOnly, getPadding }: CourseMapOptions) {
+  constructor(container: HTMLElement, { onPosition, onToggleMapOnly, getPadding, onCoursePick, onPickClose }: CourseMapOptions) {
+    this.onPickClose = onPickClose;
     this.getPadding = getPadding;
     this.map = new maplibregl.Map({
       container,
@@ -219,6 +228,15 @@ export class CourseMap {
       }
     });
     this.map.on('style.load', () => this.addCourseLayers());
+    // Tipp auf die Strecke: auf den nächsten Streckenpunkt einrasten (max. 32 px daneben)
+    this.map.on('click', (e) => {
+      if (!this.event || !onCoursePick) return;
+      const n = nearestOnCourse(this.event, { lat: e.lngLat.lat, lng: e.lngLat.lng });
+      if (!n) return;
+      const px = this.map.project([n.point.lng, n.point.lat]);
+      if (Math.hypot(px.x - e.point.x, px.y - e.point.y) <= 32) onCoursePick(n);
+      else this.closePick();
+    });
     this.map.on('webglcontextlost', () => this.contextLost++);
 
     this.locator = new LocateControl(
@@ -266,6 +284,43 @@ export class CourseMap {
     if (!b) return;
     this.map.fitBounds(b, { padding: this.safePadding(), maxZoom: 15, duration: 600 });
   }
+
+  /**
+   * Weg zum angetippten Punkt zeigen: Weg ins Bild, die Hinweis-Karte darf ihn nicht verdecken.
+   * Ragt die Karte danach noch heraus, wird mit mehr Rand auf der Seite neu eingepasst.
+   */
+  fitPick(points: Point[], attempt = 0): void {
+    const b = bounds(points);
+    const el = this.pickPopup?.getElement();
+    if (!b) return;
+    const pad = this.safePadding();
+    const c = this.map.getContainer();
+    const h = (el?.getBoundingClientRect().height ?? 0) + 30;
+    const extra = this.pickExtra ?? { top: this.pickAnchor === 'bottom' ? h : 0, bottom: this.pickAnchor === 'top' ? h : 0, left: 0, right: 0 };
+    this.pickExtra = extra;
+    const room = (n: number) => Math.max(0, n);
+    pad.top += Math.min(extra.top, room(c.clientHeight - pad.top - pad.bottom - 120));
+    pad.bottom += Math.min(extra.bottom, room(c.clientHeight - pad.top - pad.bottom - 120));
+    pad.left += Math.min(extra.left, room(c.clientWidth - pad.left - pad.right - 80));
+    pad.right += Math.min(extra.right, room(c.clientWidth - pad.left - pad.right - 80));
+    this.map.fitBounds(b, { padding: pad, maxZoom: 15, duration: attempt ? 300 : 600 });
+    this.map.once('moveend', () => {
+      const pop = this.pickPopup?.getElement();
+      if (!pop) return (this.pickExtra = null);
+      const r = pop.getBoundingClientRect();
+      const box = c.getBoundingClientRect();
+      const over = { left: box.left + 8 - r.left, right: r.right - (box.right - 8) };
+      if (attempt < 2 && (over.left > 2 || over.right > 2)) {
+        if (over.left > 2) extra.right += over.left; // Punkt nach rechts → rechts mehr Rand
+        if (over.right > 2) extra.left += over.right;
+        this.fitPick(points, attempt + 1);
+      } else {
+        this.pickExtra = null;
+        this.ensurePickVisible();
+      }
+    });
+  }
+  private pickExtra: { top: number; bottom: number; left: number; right: number } | null = null;
 
   /** Padding begrenzen, damit fitBounds auf kleinen Bildschirmen nicht scheitert. */
   private safePadding(): Padding {
@@ -316,6 +371,16 @@ export class CourseMap {
       planScreen: (this.planGeoJSON.features[0]?.geometry as { coordinates?: number[][] } | undefined)?.coordinates
         ?.map((c) => this.map.project([c[0], c[1]]))
         .map((p) => [Math.round(p.x), Math.round(p.y)]),
+      pickRoutes: this.pickGeoJSON.features.length,
+      renderedPick: this.map.getLayer('pick-route') ? this.map.queryRenderedFeatures({ layers: ['pick-route'] }).length : -1,
+      pickOpen: !!this.pickPopup,
+      pickScreen: (this.pickGeoJSON.features[0]?.geometry as { coordinates?: number[][] } | undefined)?.coordinates
+        ?.map((c) => this.map.project([c[0], c[1]]))
+        .map((p) => [Math.round(p.x), Math.round(p.y)]),
+      // Stichproben der Strecke in Bildschirm-Pixeln (zum Antippen in Tests)
+      courseScreen: (this.event?.legs.flatMap((l) => l.points) ?? [])
+        .map((p) => this.map.project([p.lng, p.lat]))
+        .map((p) => [Math.round(p.x), Math.round(p.y)]),
       zoom: Math.round(this.map.getZoom() * 10) / 10,
       canvas: `${canvas.width}x${canvas.height}`,
       loaded: this.map.loaded(),
@@ -359,6 +424,82 @@ export class CourseMap {
       // Durchgezogen statt gestrichelt: gestrichelte Linien rendern manche Grafiktreiber nicht zuverlässig
       paint: { 'line-color': PLAN_COLOR, 'line-width': 5 },
     });
+    // Weg zu einem angetippten Punkt: gleiche Optik wie Plan-Wege
+    this.map.addSource('pick-route', { type: 'geojson', data: this.pickGeoJSON });
+    this.map.addLayer({
+      id: 'pick-route-casing',
+      type: 'line',
+      source: 'pick-route',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#FFFFFF', 'line-width': 9 },
+    });
+    this.map.addLayer({
+      id: 'pick-route',
+      type: 'line',
+      source: 'pick-route',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': PLAN_COLOR, 'line-width': 5 },
+    });
+  }
+
+  /** Kartenhinweis am angetippten Streckenpunkt öffnen bzw. Inhalt ersetzen. */
+  /**
+   * Kartenhinweis am angetippten Streckenpunkt öffnen bzw. Inhalt ersetzen.
+   * anchor 'bottom' = Hinweis über dem Punkt, 'top' = darunter (z. B. wenn der Weg von oben kommt).
+   */
+  showPick(point: Point, content: HTMLElement, anchor: 'top' | 'bottom' = 'bottom'): void {
+    if (this.pickPopup && this.pickAnchor !== anchor) {
+      // Seite wechseln: alten Hinweis still entfernen (kein „geschlossen“)
+      this.pickPopup.off('close', this.onPopupClose);
+      this.pickPopup.remove();
+      this.pickPopup = null;
+    }
+    if (!this.pickPopup) {
+      this.pickAnchor = anchor;
+      this.pickPopup = new maplibregl.Popup({ className: 'pick-popup', maxWidth: '300px', offset: 14, focusAfterOpen: false, closeOnClick: false, anchor });
+      this.pickPopup.on('close', this.onPopupClose);
+      this.pickPopup.setLngLat([point.lng, point.lat]).setDOMContent(content).addTo(this.map);
+      requestAnimationFrame(() => this.ensurePickVisible());
+    } else {
+      const old = this.pickPopup.getLngLat();
+      this.pickPopup.setLngLat([point.lng, point.lat]).setDOMContent(content);
+      if (old.lat !== point.lat || old.lng !== point.lng) requestAnimationFrame(() => this.ensurePickVisible());
+    }
+  }
+  private pickAnchor: 'top' | 'bottom' = 'bottom';
+  private onPopupClose = () => {
+    this.pickPopup = null;
+    this.setPickRoute(null);
+    this.onPickClose?.();
+  };
+
+  closePick(): void {
+    this.pickPopup?.remove();
+  }
+
+  setPickRoute(points: Point[] | null): void {
+    this.pickGeoJSON = {
+      type: 'FeatureCollection',
+      features: points
+        ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: points.map((p) => [p.lng, p.lat]) } }]
+        : [],
+    };
+    (this.map.getSource('pick-route') as GeoJSONSource | undefined)?.setData(this.pickGeoJSON);
+  }
+
+  /** Hinweis-Karte (samt Punkt) komplett in den freien Kartenbereich schieben. */
+  ensurePickVisible(): void {
+    const el = this.pickPopup?.getElement();
+    if (!el) return;
+    const pad = this.safePadding();
+    const c = this.map.getContainer().getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const box = { top: c.top + pad.top, bottom: c.bottom - pad.bottom + 20, left: c.left + Math.min(pad.left, 12), right: c.right - pad.right };
+    const shift = (lo: number, hi: number, a: number, b: number) =>
+      b - a > hi - lo ? a - lo : a < lo ? a - lo : b > hi ? b - hi : 0;
+    const dx = shift(box.left, box.right, r.left, r.right);
+    const dy = shift(box.top, box.bottom, r.top, r.bottom);
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) this.map.panBy([dx, dy], { duration: 300 });
   }
 
   /** Anfeuer-Plan anzeigen: nummerierte Stopps + Wege dorthin. Leere Liste = Plan entfernen. */
