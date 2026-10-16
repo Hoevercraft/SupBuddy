@@ -419,3 +419,77 @@ body:not(.has-event) .ctrl-maponly { display: none; }
 .form-error { color: var(--danger); font-weight: 600; margin: 0; }
 .form-error[hidden] { display: none; }
 .btn-danger { color: var(--danger); justify-self: start; }
+
+/* ---------------------------------------------------------------- Anfeuer-Plan */
+
+.cheer { margin-top: 4px; }
+
+.seg { display: flex; border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; margin: 6px 0 10px; }
+.seg-btn {
+  flex: 1;
+  min-height: 42px;
+  font: 600 16px/1 var(--font-body);
+  background: #fff;
+  color: var(--ink);
+  border: 0;
+  border-left: 1px solid var(--line);
+  cursor: pointer;
+}
+.seg-btn:first-child { border-left: 0; }
+.seg-btn[aria-pressed='true'] { background: var(--ink); color: #fff; }
+
+.cheer-fields { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 15px; color: var(--ink-soft); }
+.cheer-fields label { display: inline-flex; align-items: center; gap: 6px; }
+.cheer-fields select, .cheer-fields input {
+  font: 16px/1.2 var(--font-body);
+  color: var(--ink);
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.cheer-fields input { width: 64px; }
+.cheer-from { margin: 8px 0 10px !important; }
+
+.plan { margin-top: 12px; }
+.plan-summary { font-weight: 600; }
+.plan-empty { font-weight: 600; margin-top: 12px !important; }
+
+.stops { list-style: none; margin: 6px 0 4px; padding: 0; }
+.stop {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.stop:first-child { border-top: 1px solid var(--line); }
+.stop-num, .stop-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--bib);
+  color: var(--ink);
+  font: 800 16px/1 var(--font-sign);
+  border: 2px solid var(--ink);
+}
+.stop-pin { box-shadow: 0 2px 4px rgb(0 0 0 / 0.25); }
+.stop-title { font: 800 19px/1.2 var(--font-sign); }
+.stop-way, .stop-arrive { font-size: 15px; }
+.stop-arrive { font-weight: 600; }
+.stop-athletes { list-style: none; margin: 4px 0 6px; padding: 0; font-size: 15px; }
+.stop-athletes li { padding-left: 8px; border-left: 3px solid var(--athlete-color); margin: 2px 0; }
+.stop-athletes li.main { font-weight: 600; }
+.stop-athletes li.missed { color: var(--ink-soft); border-left-style: dotted; }
+.stop-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-small { min-height: 38px; padding: 0 12px; font-size: 15px; display: inline-flex; align-items: center; text-decoration: none; }
+.badge-tight {
+  font: 600 13px/1 var(--font-body);
+  background: #fde2e1;
+  color: var(--danger);
+  padding: 3px 6px;
+  border-radius: 4px;
+  vertical-align: middle;
+}

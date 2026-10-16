@@ -6,8 +6,12 @@ import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { athleteDialogHtml, athletesNow, athletesSection, initials, openAthleteDialog, readAthleteForm } from './athletes-ui';
 import { courseStats, legDistance, nearestOnCourse } from './course';
+import { MODES, type Mode } from './cheer';
 import { isoDate } from './format';
-import { formatDistance, formatKm } from './geo';
+import { buildPlan, type Plan, type PlanSettings } from './plan';
+import { loadSettings, planSection, saveSettings } from './plan-ui';
+import { fetchRoute } from './routing';
+import { formatDistance, formatKm, haversine } from './geo';
 import { GpxError, parseGpx } from './gpx';
 import { DISCIPLINES, eventKind, type Discipline, type Point, type RaceEvent } from './model';
 import { decodeEvent, normalizeLeg, shareUrl, tokenFromHash } from './share';
@@ -22,6 +26,9 @@ export const BUILD_LABEL = `v${__APP_VERSION__} · ${__APP_COMMIT__} · ${__APP_
 let event: RaceEvent | null = null;
 let position: Point | null = null;
 let mapOnly = false;
+let plan: Plan | null = null;
+let planBusy = false;
+let planSettings: PlanSettings | null = null;
 let courseMap: import('./map').CourseMap | null = null;
 
 // ---------------------------------------------------------------- Hilfen
@@ -157,6 +164,7 @@ function renderSheet(): void {
   sheet.innerHTML = `
     ${positionText()}
     ${athletesSection(event, position, Date.now())}
+    ${planSection(event, { settings: currentPlanSettings(), plan, busy: planBusy, fromPosition: !!position, now: Date.now() })}
     <h3 class="sheet-sub">Strecke</h3>
     <ul class="legs">${legs}</ul>
     <div class="actions">
@@ -214,15 +222,63 @@ function render(fit = false): void {
 }
 
 /** Plan-Positionen laufen mit der Uhr: regelmäßig auffrischen, ohne laufende Eingaben zu stören. */
+/** Letzte Berührung/Scrollen im Panel – solange jemand dort arbeitet, nicht neu aufbauen. */
+let lastSheetInteraction = 0;
+const SHEET_QUIET_MS = 8000;
+
+function sheetBusy(): boolean {
+  const sheet = $('#sheet');
+  const focused = sheet.contains(document.activeElement) && document.activeElement !== document.body;
+  return focused || Date.now() - lastSheetInteraction < SHEET_QUIET_MS || $<HTMLDialogElement>('#athlete-dialog').open;
+}
+
 function tick(): void {
   if (!event || event.athletes.length === 0) return;
   renderAthleteMarkers();
-  const sheet = $('#sheet');
-  const busy = sheet.contains(document.activeElement) && document.activeElement !== document.body;
-  if (!busy && !$<HTMLDialogElement>('#athlete-dialog').open) renderSheet();
+  if (!sheetBusy()) renderSheet();
+}
+
+function currentPlanSettings(): PlanSettings {
+  if (!event) throw new Error('kein Event');
+  if (!planSettings || planSettings.athleteIndex >= event.athletes.length) planSettings = loadSettings(event);
+  return planSettings;
+}
+
+function updatePlanSettings(patch: Partial<PlanSettings>): void {
+  planSettings = { ...currentPlanSettings(), ...patch };
+  saveSettings(planSettings);
+}
+
+function clearPlan(): void {
+  plan = null;
+  courseMap?.setPlan([], []);
+}
+
+async function createPlan(): Promise<void> {
+  if (!event || planBusy) return;
+  const ev = event;
+  const settings = currentPlanSettings();
+  const start = position ?? ev.legs[0].points[0];
+  planBusy = true;
+  renderSheet();
+  try {
+    plan = await buildPlan(ev, settings, start, Date.now(), (a, b) => fetchRoute(ev, a, b, settings.mode));
+    courseMap?.setPlan(
+      plan.stops.map((s) => ({ point: s.candidate.point })),
+      plan.stops.map((s) => s.route.points),
+    );
+    const pts = plan.stops.flatMap((s) => s.route.points);
+    if (pts.length) courseMap?.fitPoints([start, ...pts]);
+  } finally {
+    planBusy = false;
+    renderSheet();
+    document.body.dataset.planned = String(Date.now());
+  }
 }
 
 async function setEvent(ev: RaceEvent | null, fit = true): Promise<void> {
+  // Strecke oder Athleten geändert → alter Plan passt nicht mehr
+  if (plan) clearPlan();
   event = ev && ev.legs.length > 0 ? ev : null;
   render(fit);
   await saveEvent(event);
@@ -269,12 +325,30 @@ function bindEvents(): void {
     fileInput.value = '';
   });
 
+  for (const type of ['pointerdown', 'scroll', 'keydown']) {
+    $('#sheet').addEventListener(type, () => (lastSheetInteraction = Date.now()), { passive: true, capture: true });
+  }
+
   $('#sheet').addEventListener('click', async (e) => {
     const t = e.target as HTMLElement;
     if (t.closest('#btn-load')) fileInput.click();
     else if (t.closest('#btn-share')) await openShare();
     else if (t.closest('#btn-locate')) courseMap?.locate();
-    else if (t.closest('#btn-add-athlete') && event) openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, null);
+    else if (t.closest('[data-mode]')) {
+      const m = (t.closest('[data-mode]') as HTMLElement).dataset.mode as Mode;
+      updatePlanSettings({ mode: m, speed: MODES[m].kmh });
+      clearPlan();
+      renderSheet();
+    } else if (t.closest('#btn-plan')) await createPlan();
+    else if (t.closest('#btn-plan-clear')) {
+      clearPlan();
+      renderSheet();
+    } else if (t.closest('[data-show-stop]') && plan) {
+      const i = Number((t.closest('[data-show-stop]') as HTMLElement).dataset.showStop);
+      const stop = plan.stops[i];
+      const from = i === 0 ? plan.start : plan.stops[i - 1].candidate.point;
+      if (stop) courseMap?.fitPoints([from, ...stop.route.points]);
+    } else if (t.closest('#btn-add-athlete') && event) openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, null);
     else if (t.closest('.athlete-edit') && event) {
       const i = Number((t.closest('.athlete-edit') as HTMLElement).dataset.index);
       openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, i);
@@ -289,6 +363,18 @@ function bindEvents(): void {
 
   $('#sheet').addEventListener('change', async (e) => {
     const t = e.target as HTMLElement;
+    if (t.id === 'plan-athlete' || t.id === 'plan-stops' || t.id === 'plan-speed') {
+      const v = (t as HTMLInputElement | HTMLSelectElement).value;
+      if (t.id === 'plan-athlete') updatePlanSettings({ athleteIndex: Number(v) });
+      if (t.id === 'plan-stops') updatePlanSettings({ maxStops: Number(v) });
+      if (t.id === 'plan-speed') {
+        const kmh = Number(v.replace(',', '.'));
+        if (kmh >= 2 && kmh <= 40) updatePlanSettings({ speed: kmh });
+      }
+      clearPlan();
+      renderSheet();
+      return;
+    }
     if (t instanceof HTMLInputElement && t.id === 'race-date' && event) {
       await setEvent({ ...event, date: /^\d{4}-\d{2}-\d{2}$/.test(t.value) ? t.value : null }, false);
       return;
@@ -392,8 +478,12 @@ async function start(): Promise<void> {
     const { CourseMap } = await import('./map');
     courseMap = new CourseMap($('#map'), {
       onPosition: (p) => {
+        // Beim Gehen kommen sekündlich neue Positionen: nur bei echter Bewegung neu aufbauen
+        // Der erste Standort (oder sein Verlust) wird immer sofort angezeigt.
+        const first = !position || !p;
+        const moved = first || haversine(position!, p!) > 15;
         position = p;
-        renderSheet();
+        if (first || (moved && !sheetBusy())) renderSheet();
       },
       onToggleMapOnly: () => setMapOnly(!mapOnly),
       getPadding: visiblePadding,

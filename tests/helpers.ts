@@ -28,6 +28,17 @@ export function collectErrors(page: Page): string[] {
  * (toBeVisible() allein reicht nicht – das hat die 0-px-Karte durchgelassen.)
  */
 export async function expectOnScreen(locator: Locator, minSize = 8): Promise<void> {
+  // Mehrfach versuchen: wird das Element zwischendurch neu aufgebaut, zählt der nächste Stand
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await checkOnScreen(locator, minSize);
+    } catch (e) {
+      if (attempt >= 3 || !/not attached|detached/i.test(String(e))) throw e;
+    }
+  }
+}
+
+async function checkOnScreen(locator: Locator, minSize: number): Promise<void> {
   await expect(locator).toBeVisible();
   // Erreichbar heißt: notfalls im Panel hinscrollen, wie ein Mensch es tun würde
   await locator.scrollIntoViewIfNeeded();
@@ -86,4 +97,38 @@ export async function openApp(page: Page, hash = ''): Promise<void> {
   await blockTiles(page);
   await page.goto(`/${hash}`);
   await page.locator('body[data-ready="true"]').waitFor();
+}
+
+/**
+ * BRouter-Attrappe: gerader Weg von A nach B, Länge = Luftlinie × factor.
+ * Gibt die Liste der angefragten URLs zurück (zum Prüfen von Profil und Sperrlinien).
+ */
+export async function mockRouting(page: Page, factor = 1.3, status = 200): Promise<string[]> {
+  const urls: string[] = [];
+  await page.route(/brouter\.de\/brouter/, async (route) => {
+    const url = route.request().url();
+    urls.push(url);
+    if (status !== 200) return route.fulfill({ status, body: 'down' });
+    const lonlats = new URL(url).searchParams.get('lonlats')!.split('|').map((p) => p.split(',').map(Number));
+    const [[lng1, lat1], [lng2, lat2]] = lonlats;
+    const R = 6_371_000;
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const h =
+      Math.sin(rad(lat2 - lat1) / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(rad(lng2 - lng1) / 2) ** 2;
+    const dist = 2 * R * Math.asin(Math.sqrt(h)) * factor;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: { 'track-length': String(Math.round(dist)), 'total-time': '0' },
+            geometry: { type: 'LineString', coordinates: [[lng1, lat1, 0], [(lng1 + lng2) / 2, (lat1 + lat2) / 2 + 0.002, 0], [lng2, lat2, 0]] },
+          },
+        ],
+      }),
+    });
+  });
+  return urls;
 }
