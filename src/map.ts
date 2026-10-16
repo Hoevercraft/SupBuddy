@@ -75,6 +75,64 @@ class MapOnlyToggle implements maplibregl.IControl {
   }
 }
 
+export type SectionId = 'athleten' | 'plan' | 'strecke';
+
+const svg = (d: string) =>
+  `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+export const SECTION_ICONS: { id: SectionId; label: string; icon: string }[] = [
+  {
+    id: 'athleten',
+    label: 'Athleten',
+    icon: svg('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.3c2.6-.4 4.6 1.2 5 4.2"/>'),
+  },
+  {
+    id: 'plan',
+    label: 'Anfeuer-Plan',
+    // Megafon
+    icon: svg('<path d="M4 10v4h3l7 4V6L7 10H4z"/><path d="M17.5 9.5a4 4 0 0 1 0 5"/><path d="M7 14l1.5 5h2.5l-1-4.4"/>'),
+  },
+  {
+    id: 'strecke',
+    label: 'Strecke',
+    icon: svg('<circle cx="5.5" cy="18.5" r="2"/><circle cx="18.5" cy="5.5" r="2"/><path d="M7.5 18.5h7a3 3 0 0 0 0-6h-5a3 3 0 0 1 0-6h7"/>'),
+  },
+];
+
+/** Knöpfe für die Bereiche (Athleten, Plan, Strecke) unter Standort und Vollbild. */
+class SectionsControl implements maplibregl.IControl {
+  private container = document.createElement('div');
+  private buttons = new Map<SectionId, HTMLButtonElement>();
+
+  constructor(onSection: (s: SectionId) => void) {
+    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group ctrl-sections';
+    for (const { id, label, icon } of SECTION_ICONS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ctrl-section-btn';
+      b.dataset.section = id;
+      b.setAttribute('aria-label', label);
+      b.setAttribute('aria-pressed', 'false');
+      b.title = label;
+      b.innerHTML = icon;
+      b.addEventListener('click', () => onSection(id));
+      this.container.appendChild(b);
+      this.buttons.set(id, b);
+    }
+  }
+
+  setActive(s: SectionId | null): void {
+    for (const [id, b] of this.buttons) b.setAttribute('aria-pressed', String(id === s));
+  }
+
+  onAdd(): HTMLElement {
+    return this.container;
+  }
+
+  onRemove(): void {
+    this.container.remove();
+  }
+}
+
 export interface AthleteMarker {
   label: string;
   name: string;
@@ -214,6 +272,8 @@ export interface CourseMapOptions {
   onCoursePick?: (n: CourseNearest) => void;
   /** Kartenhinweis am angetippten Punkt wurde geschlossen. */
   onPickClose?: () => void;
+  /** Bereichs-Knopf rechts getippt */
+  onSection?: (s: SectionId) => void;
 }
 
 export class CourseMap {
@@ -235,8 +295,9 @@ export class CourseMap {
   private usingFallback = false;
   private contextLost = 0;
   private mapOnlyToggle: MapOnlyToggle;
+  private sections: SectionsControl | null = null;
 
-  constructor(container: HTMLElement, { onPosition, onToggleMapOnly, getPadding, onCoursePick, onPickClose }: CourseMapOptions) {
+  constructor(container: HTMLElement, { onPosition, onToggleMapOnly, getPadding, onCoursePick, onPickClose, onSection }: CourseMapOptions) {
     this.onPickClose = onPickClose;
     this.getPadding = getPadding;
     this.map = new maplibregl.Map({
@@ -291,6 +352,10 @@ export class CourseMap {
     this.map.addControl(this.locator, 'top-right');
     this.mapOnlyToggle = new MapOnlyToggle(onToggleMapOnly);
     this.map.addControl(this.mapOnlyToggle, 'top-right');
+    if (onSection) {
+      this.sections = new SectionsControl(onSection);
+      this.map.addControl(this.sections, 'top-right');
+    }
     const attribution = new maplibregl.AttributionControl({
         compact: true,
         // Immer sichtbar, auch wenn nur der Ersatzstil geladen ist
@@ -304,6 +369,10 @@ export class CourseMap {
     collapse();
     this.map.once('load', collapse);
     this.map.once('idle', collapse);
+  }
+
+  setSection(s: SectionId | null): void {
+    this.sections?.setActive(s);
   }
 
   setMapOnly(on: boolean): void {

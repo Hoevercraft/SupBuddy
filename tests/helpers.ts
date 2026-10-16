@@ -211,3 +211,10 @@ export async function mockTransit(page: Page, opts: { kmh?: number; kreis?: stri
   });
   return urls;
 }
+
+/** Bereich über die Icons rechts öffnen (falls noch nicht offen). */
+export async function openSection(page: Page, label: 'Athleten' | 'Anfeuer-Plan' | 'Strecke'): Promise<void> {
+  const b = page.locator(`.ctrl-section-btn[aria-label="${label}"]`);
+  if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click();
+  await expect(page.getByTestId('section-title')).toHaveText(label);
+}

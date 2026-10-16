@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { collectErrors, countColorPixels, expectOnScreen, fixture, openApp } from './helpers';
+import { collectErrors, countColorPixels, expectOnScreen, fixture, openApp, openSection } from './helpers';
 
 /*
  * Athleten und Zeitplan in der Oberfläche.
@@ -75,6 +75,7 @@ test('Athlet erscheint auf der Karte – nur solange er laut Plan unterwegs ist'
   await setClock(page, '12:00');
   await page.reload();
   await page.locator('body[data-ready="true"]').waitFor();
+  await openSection(page, 'Athleten');
   await expect(page.getByTestId('athlete-status')).toHaveText(/^Laut Plan im Ziel seit 11:15$/);
   await expect(page.getByTestId('athlete-pin')).toHaveCount(0);
 });
@@ -102,6 +103,7 @@ test('Triathlon: Pace je Disziplin und Wechselzeit', async ({ page }) => {
   await setClock(page, '09:31');
   await page.reload();
   await page.locator('body[data-ready="true"]').waitFor();
+  await openSection(page, 'Athleten');
   await expect(page.getByTestId('athlete-status')).toHaveText('Laut Plan im Wechsel nach Schwimmen');
 });
 
@@ -157,6 +159,7 @@ test('Teilen-Link nimmt Athleten, Pace und Renntag mit', async ({ page, browser 
   await addAthlete(page, 'Jan', '10:00');
   await addAthlete(page, 'Max', '10:00', { 'Rad-Tempo in km/h': '36' });
 
+  await openSection(page, 'Strecke');
   await page.getByRole('button', { name: 'Link teilen' }).click();
   // Link wird asynchron erzeugt (Kompression) → erst warten, bis er da ist
   await expect(page.getByTestId('share-link')).toHaveValue(/#e=[A-Za-z0-9_-]+$/);
@@ -165,6 +168,7 @@ test('Teilen-Link nimmt Athleten, Pace und Renntag mit', async ({ page, browser 
   const other = await browser.newPage();
   await setClock(other, '10:10');
   await openApp(other, new URL(link).hash);
+  await openSection(other, 'Athleten');
   await expect(other.getByTestId('athlete')).toHaveCount(2);
   await expect(other.locator('#race-date')).toHaveValue('2026-08-23');
   await expect(other.getByTestId('athlete-status')).toHaveText(['Laut Plan bei km 5,0', 'Laut Plan bei km 6,0']);

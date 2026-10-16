@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { countColorPixels, expectOnScreen, fixture, mockRouting, openApp } from './helpers';
+import { countColorPixels, expectOnScreen, fixture, mockRouting, openApp, openSection } from './helpers';
 
 /*
  * Anfeuer-Plan in der Oberfläche. Routing (BRouter) wird durch eine Attrappe ersetzt,
@@ -37,6 +37,7 @@ async function setup(page: Page) {
 
 async function makePlan(page: Page) {
   const before = await page.evaluate(() => document.body.dataset.planned ?? '');
+  await openSection(page, 'Anfeuer-Plan');
   await page.getByRole('button', { name: 'Plan erstellen' }).click();
   await page.waitForFunction((b) => (document.body.dataset.planned ?? '') !== b, before);
 }
@@ -50,6 +51,7 @@ test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne S
   await page.getByRole('button', { name: 'Standort anzeigen' }).click();
   await expect(page.getByTestId('user-dot')).toHaveCount(1);
 
+  await openSection(page, 'Anfeuer-Plan');
   await page.getByRole('button', { name: 'Rad', exact: true }).click();
   await expect(page.getByLabel('Dein Tempo in km/h')).toHaveValue('15');
   await expect(page.getByText('Startpunkt: dein Standort.')).toBeVisible();
@@ -141,6 +143,7 @@ test('Navigation: Karten-App bekommt Ziel, Rad-Modus und Zwischenziele auf unser
   await setup(page);
   await page.getByRole('button', { name: 'Standort anzeigen' }).click();
   await expect(page.getByTestId('user-dot')).toHaveCount(1);
+  await openSection(page, 'Anfeuer-Plan');
   await page.getByRole('button', { name: 'E-Scooter' }).click();
   await expect(page.getByLabel('Dein Tempo in km/h')).toHaveValue('18');
   await makePlan(page);
@@ -184,6 +187,7 @@ test('Zu Fuß von weit weg: verständlicher Hinweis statt leerem Plan', async ({
 test('Routing nicht erreichbar: Plan mit geschätzten Wegen und Hinweis', async ({ page }) => {
   await mockRouting(page, 1.3, 503);
   await setup(page);
+  await openSection(page, 'Anfeuer-Plan');
   await page.getByRole('button', { name: 'Rad', exact: true }).click();
   await makePlan(page);
   await expect(page.getByTestId('plan-estimated')).toBeVisible();
@@ -193,6 +197,7 @@ test('Routing nicht erreichbar: Plan mit geschätzten Wegen und Hinweis', async 
 test('Plan für einen anderen Athleten, Einstellungen bleiben erhalten', async ({ page }) => {
   await mockRouting(page);
   await setup(page);
+  await openSection(page, 'Anfeuer-Plan');
   await page.getByRole('button', { name: 'Rad', exact: true }).click();
   await page.getByLabel('Plan für Athlet').selectOption({ label: 'Max' });
   await page.getByLabel('Wunschanzahl Stopps').selectOption('2');
@@ -202,6 +207,7 @@ test('Plan für einen anderen Athleten, Einstellungen bleiben erhalten', async (
 
   await page.reload();
   await page.locator('body[data-ready="true"]').waitFor();
+  await openSection(page, 'Anfeuer-Plan');
   await expect(page.getByLabel('Plan für Athlet')).toHaveValue('1');
   await expect(page.getByLabel('Wunschanzahl Stopps')).toHaveValue('2');
   await expect(page.getByRole('button', { name: 'Rad', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -210,12 +216,17 @@ test('Plan für einen anderen Athleten, Einstellungen bleiben erhalten', async (
 test('Ändern eines Athleten verwirft den alten Plan', async ({ page }) => {
   await mockRouting(page);
   await setup(page);
+  await openSection(page, 'Anfeuer-Plan');
   await page.getByRole('button', { name: 'Rad', exact: true }).click();
   await makePlan(page);
   await expect(page.getByTestId('plan')).toBeVisible();
+  await openSection(page, 'Athleten');
   await page.getByRole('button', { name: 'Jan bearbeiten' }).click();
   await page.locator('#athlete-dialog').getByLabel('Startzeit').fill('10:30');
   await page.locator('#athlete-dialog').getByRole('button', { name: 'Speichern' }).click();
+  await expect(page.locator('#toast')).toHaveText('Jan gespeichert.');
+  await openSection(page, 'Anfeuer-Plan');
+  await expect(page.getByRole('button', { name: 'Plan erstellen' })).toBeVisible();
   await expect(page.getByTestId('plan')).toHaveCount(0);
   await expect(page.getByTestId('stop-pin')).toHaveCount(0);
 });
@@ -223,6 +234,7 @@ test('Ändern eines Athleten verwirft den alten Plan', async ({ page }) => {
 test('Ohne Athleten: Hinweis statt Plan-Einstellungen', async ({ page }) => {
   await openApp(page);
   await page.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await openSection(page, 'Anfeuer-Plan');
   await expect(page.getByText('Trag erst einen Athleten ein.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Plan erstellen' })).toHaveCount(0);
 });

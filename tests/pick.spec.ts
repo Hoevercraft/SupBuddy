@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { countColorPixels, expectOnScreen, fixture, mockRouting, openApp } from './helpers';
+import { countColorPixels, expectOnScreen, fixture, mockRouting, openApp, openSection } from './helpers';
 
 /*
  * Auf die Strecke tippen: Karte am Punkt mit Durchgangszeiten, „Weg hierhin“ mit Urteil
@@ -140,6 +140,7 @@ test('Strecke antippen → Zeiten am Punkt, Weg hierhin mit Urteil, Weg auf der 
   await setup(page);
 
   // Dezenter Hinweis im Panel
+  await openSection(page, 'Anfeuer-Plan');
   await expect(page.getByTestId('pick-tip')).toContainText('Tippe auf die Strecke');
 
   await tap(page, await freeCoursePoint(page));
@@ -232,6 +233,7 @@ test('Verkehrsmittel in der Punkt-Karte umschalten plant den Weg neu (und gilt a
   };
   expect(travel((await way.textContent())!)).toBeLessThan(travel(walk));
   // Plan-Bereich übernimmt das Verkehrsmittel
+  await openSection(page, 'Anfeuer-Plan');
   await expect(page.locator('#sheet [data-mode="rad"]')).toHaveAttribute('aria-pressed', 'true');
   await context.close();
 });

@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { suggestTicket, groupPrice, LAND_TICKETS } from '../src/tickets';
 import { readFileSync } from 'node:fs';
 import { chooseJourney, decodePolyline, delfiId, legLabel, parseJourneys, rideLegs, type Journey, type TransitLeg } from '../src/transit';
-import { encodePolyline, fixture, mockRouting, mockTransit, openApp } from './helpers';
+import { encodePolyline, fixture, mockRouting, mockTransit, openApp, openSection } from './helpers';
 
 /* Stufe 4: Bus & Bahn im Anfeuer-Plan, Anzahl Supporter, Ticket-Tipp. */
 
@@ -147,6 +147,7 @@ async function setup(page: Page) {
   await addAthlete(page, 'Jan', '10:00', '25');
   await page.getByRole('button', { name: 'Standort anzeigen' }).click();
   await expect(page.getByTestId('user-dot')).toHaveCount(1);
+  await openSection(page, 'Anfeuer-Plan');
   await page.getByRole('button', { name: 'Bus & Bahn', exact: true }).click();
 }
 
