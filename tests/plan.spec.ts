@@ -6,6 +6,10 @@ import { countColorPixels, expectOnScreen, fixture, mockRouting, openApp } from 
  * die Uhr steht fest. Radrennen-Fixture: 37,7-km-Runde um Lüneburg.
  */
 
+// Service Worker aus: In WebKit gehen Anfragen sonst am Routing-Mock vorbei (der SW leitet sie weiter).
+// Ob der SW selbst funktioniert, prüft smoke.spec.ts.
+test.use({ serviceWorkers: 'block' });
+
 const INSIDE_EAST = { latitude: 53.27, longitude: 10.45 }; // innerhalb der Runde, ~3 km von der Strecke
 const PLAN_COLOR = '#312e81'; // = PLAN_COLOR in src/map.ts
 
@@ -39,7 +43,7 @@ async function makePlan(page: Page) {
 
 test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne Strecke zu queren', async ({ browser }) => {
   test.slow(); // langer Ablauf: zwei Athleten, Standort, Plan, Vollbild
-  const context = await browser.newContext({ geolocation: INSIDE_EAST, permissions: ['geolocation'] });
+  const context = await browser.newContext({ geolocation: INSIDE_EAST, permissions: ['geolocation'], serviceWorkers: 'block' });
   const page = await context.newPage();
   const urls = await mockRouting(page);
   await setup(page);
@@ -101,7 +105,7 @@ test('Navigation öffnet die passende Karten-App mit dem Stopp als Ziel', async 
 });
 
 test('Zu Fuß von weit weg: verständlicher Hinweis statt leerem Plan', async ({ browser }) => {
-  const context = await browser.newContext({ geolocation: { latitude: 53.2464, longitude: 10.4115 }, permissions: ['geolocation'] });
+  const context = await browser.newContext({ geolocation: { latitude: 53.2464, longitude: 10.4115 }, permissions: ['geolocation'], serviceWorkers: 'block' });
   const page = await context.newPage();
   await mockRouting(page);
   await setup(page);
