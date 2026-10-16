@@ -24,6 +24,8 @@ async function addAthlete(page: Page, name: string, start: string, fields: Recor
   for (const [label, value] of Object.entries(fields)) await dialog.getByLabel(label).fill(value);
   await dialog.getByRole('button', { name: 'Speichern' }).click();
   await expect(dialog).toBeHidden();
+  // Die Meldung erscheint erst, wenn auch gespeichert ist – sonst kann ein Reload den Athleten verlieren
+  await expect(page.locator('#toast')).toHaveText(`${name} hinzugefügt.`);
 }
 
 test('Radrennen: Athlet anlegen, Position laut Plan und Durchgangszeit bei mir', async ({ browser }) => {

@@ -141,11 +141,19 @@ export class CourseMap {
     this.map.addControl(this.geolocate, 'top-right');
     this.mapOnlyToggle = new MapOnlyToggle(onToggleMapOnly);
     this.map.addControl(this.mapOnlyToggle, 'top-right');
-    this.map.addControl(new maplibregl.AttributionControl({
+    const attribution = new maplibregl.AttributionControl({
         compact: true,
         // Immer sichtbar, auch wenn nur der Ersatzstil geladen ist
         customAttribution: '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>',
-      }), 'top-right');
+      });
+    this.map.addControl(attribution, 'top-right');
+    // MapLibre zeigt den Quellenhinweis anfangs ausgeklappt (breiter Textbalken über der Karte)
+    // und klappt ihn erst beim ersten Verschieben ein → direkt eingeklappt starten, (i) klappt auf.
+    const collapse = () =>
+      container.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show');
+    collapse();
+    this.map.once('load', collapse);
+    this.map.once('idle', collapse);
     this.geolocate.on('geolocate', (pos: GeolocationPosition) =>
       onPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
     );

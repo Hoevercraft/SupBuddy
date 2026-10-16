@@ -122,3 +122,16 @@ test('Vollbild: ein Knopf blendet Startnummer und Panel aus und wieder ein', asy
   await expectOnScreen(page.getByRole('button', { name: 'Link teilen' }), 40);
   await expect(page.getByRole('button', { name: 'Vollbild', exact: true })).toHaveAttribute('aria-pressed', 'false');
 });
+
+test('Kartenhinweis startet eingeklappt und lässt sich aufklappen', async ({ page }) => {
+  await openApp(page);
+  await page.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await expect(page.locator('#event-kind')).toHaveText('Radrennen');
+  await page.waitForTimeout(1500); // Karte fertig laden lassen
+  const attrib = page.locator('.maplibregl-ctrl-attrib');
+  const closed = (await attrib.boundingBox())!;
+  expect(closed.width, 'Quellenhinweis ist ausgeklappt und verdeckt die Karte').toBeLessThanOrEqual(40);
+  await attrib.locator('.maplibregl-ctrl-attrib-button').click();
+  await expect(attrib).toContainText('OpenStreetMap');
+  expect((await attrib.boundingBox())!.width).toBeGreaterThan(100);
+});
