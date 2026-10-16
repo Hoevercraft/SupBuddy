@@ -524,3 +524,8 @@ body:not(.has-event) .ctrl-maponly { display: none; }
 .seg-small .seg-btn { min-height: 32px; font-size: 14px; padding: 0 8px; }
 .pick-go { justify-content: center; }
 .pick-tip { margin-top: 10px; }
+
+/* Eigener Standort mit Blickrichtung */
+.user-loc { width: 15px; height: 15px; position: relative; }
+.user-loc .maplibregl-user-location-dot { position: absolute; inset: 0; }
+.user-cone { position: absolute; left: calc(50% - 60px); top: calc(50% - 60px); pointer-events: none; }

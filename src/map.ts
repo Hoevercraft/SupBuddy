@@ -3,6 +3,7 @@ import maplibregl, { type GeoJSONSource, type StyleSpecification } from 'maplibr
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { nearestOnCourse, type CourseNearest } from './course';
 import { bounds, haversine } from './geo';
+import { HeadingTracker } from './heading';
 import { DISCIPLINES, type Point, type RaceEvent } from './model';
 
 /** Freie OSM-Vektorkarte ohne API-Key. */
@@ -104,7 +105,11 @@ class LocateControl implements maplibregl.IControl {
   private button = document.createElement('button');
   private watchId: number | null = null;
   private dot: maplibregl.Marker | null = null;
+  private cone: SVGElement | null = null;
   private map: maplibregl.Map | null = null;
+  /** Zuletzt gezeigte Blickrichtung (für Tests/Fehlersuche) */
+  heading: { deg: number; half: number; source: string } | null = null;
+  private headingTracker = new HeadingTracker((h) => this.showHeading(h));
 
   constructor(private onFix: (p: Point) => void, private onError: () => void) {
     this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
@@ -121,6 +126,8 @@ class LocateControl implements maplibregl.IControl {
   onClick: (() => void) | null = null;
 
   start(): void {
+    // Kompass gleich mit einschalten – iOS fragt nur direkt nach einem Tippen um Erlaubnis
+    this.headingTracker.start();
     if (!('geolocation' in navigator)) return this.onError();
     if (this.watchId != null) return;
     this.button.classList.add('maplibregl-ctrl-geolocate-waiting');
@@ -130,13 +137,28 @@ class LocateControl implements maplibregl.IControl {
         this.button.classList.remove('maplibregl-ctrl-geolocate-waiting');
         this.button.classList.add('maplibregl-ctrl-geolocate-active');
         if (!this.dot && this.map) {
+          // Punkt mit Blickrichtungs-Kegel; der Marker dreht mit der Karte (Norden bleibt Norden)
           const el = document.createElement('div');
-          el.className = 'maplibregl-user-location-dot';
+          el.className = 'user-loc';
           el.dataset.testid = 'user-dot';
-          this.dot = new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(this.map);
+          el.innerHTML = `
+            <svg class="user-cone" data-testid="user-cone" viewBox="-60 -60 120 120" width="120" height="120" aria-hidden="true" style="display:none">
+              <defs>
+                <radialGradient id="user-cone-fill" cx="0" cy="0" r="60" gradientUnits="userSpaceOnUse">
+                  <stop offset="0.12" stop-color="#1da1f2" stop-opacity="0.55" />
+                  <stop offset="1" stop-color="#1da1f2" stop-opacity="0" />
+                </radialGradient>
+              </defs>
+              <path fill="url(#user-cone-fill)" />
+            </svg>
+            <div class="maplibregl-user-location-dot"></div>`;
+          this.cone = el.querySelector('svg');
+          this.dot = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat([p.lng, p.lat]).addTo(this.map);
+          this.showHeading(this.heading);
         } else {
           this.dot?.setLngLat([p.lng, p.lat]);
         }
+        this.headingTracker.updateGps(pos.coords);
         this.onFix(p);
       },
       () => {
@@ -145,6 +167,22 @@ class LocateControl implements maplibregl.IControl {
       },
       { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 },
     );
+  }
+
+  /** Kegel zeigen/verstecken; Winkel gegen Norden, die Karte dreht ihn selbst mit. */
+  private showHeading(h: { deg: number; half: number; source: string } | null): void {
+    this.heading = h;
+    if (!this.cone || !this.dot) return;
+    this.cone.style.display = h ? '' : 'none'; // SVG kennt kein hidden-Attribut
+    this.dot.getElement().dataset.heading = h ? String(Math.round(h.deg)) : '';
+    if (!h) return;
+    const path = this.cone.querySelector('path')!;
+    const r = 56;
+    const a = (h.half * Math.PI) / 180;
+    const x = Math.sin(a) * r;
+    const y = -Math.cos(a) * r;
+    path.setAttribute('d', `M0 0 L${(-x).toFixed(1)} ${y.toFixed(1)} A${r} ${r} 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)} Z`);
+    this.dot.setRotation(h.deg);
   }
 
   private stop(): void {
@@ -374,6 +412,8 @@ export class CourseMap {
       pickRoutes: this.pickGeoJSON.features.length,
       renderedPick: this.map.getLayer('pick-route') ? this.map.queryRenderedFeatures({ layers: ['pick-route'] }).length : -1,
       pickOpen: !!this.pickPopup,
+      heading: this.locator.heading,
+      bearing: Math.round(this.map.getBearing()),
       pickScreen: (this.pickGeoJSON.features[0]?.geometry as { coordinates?: number[][] } | undefined)?.coordinates
         ?.map((c) => this.map.project([c[0], c[1]]))
         .map((p) => [Math.round(p.x), Math.round(p.y)]),
