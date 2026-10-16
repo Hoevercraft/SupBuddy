@@ -211,3 +211,75 @@ function densify(points: Point[], maxStep: number): Point[] {
   }
   return out;
 }
+
+// ---------------------------------------------------------------- Quert ein Weg die Strecke?
+
+/** Abstand, ab dem ein Wegpunkt eindeutig auf einer Seite der Strecke liegt (m). */
+const SIDE_MARGIN = 30;
+
+/**
+ * Prüft, ob ein Weg die Rennstrecke quert – also von einer Seite auf die andere wechselt.
+ * An der Strecke entlanglaufen (z. B. die letzten Meter zum Anfeuerpunkt) ist kein Queren.
+ * Rund um Start und Ziel des Weges (ignoreRadius) wird nicht geprüft: Dort will man ja an die Strecke.
+ * Schwimm-Etappen zählen nicht.
+ */
+export function crossesCourse(ev: RaceEvent, route: Point[], ignoreRadius = 250): boolean {
+  if (route.length < 2) return false;
+  const legs = ev.legs.filter((l) => l.discipline !== 'schwimmen').map((l) => l.points);
+  if (legs.length === 0) return false;
+  const start = route[0];
+  const end = route[route.length - 1];
+  const ref = route[0];
+  const toXY = (p: Point): [number, number] => [
+    ((p.lng - ref.lng) * Math.PI) / 180 * Math.cos((ref.lat * Math.PI) / 180) * 6_371_000,
+    ((p.lat - ref.lat) * Math.PI) / 180 * 6_371_000,
+  ];
+  // Seite (links/rechts) eines Punktes relativ zum nächsten Streckenabschnitt, plus Lage auf der Strecke
+  const sideOf = (p: Point): { side: number; key: string } | null => {
+    const P = toXY(p);
+    let best: { d: number; side: number; key: string } | null = null;
+    legs.forEach((pts, li) => {
+      let along = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const A = toXY(pts[i - 1]);
+        const B = toXY(pts[i]);
+        const dx = B[0] - A[0];
+        const dy = B[1] - A[1];
+        const len2 = dx * dx + dy * dy;
+        const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((P[0] - A[0]) * dx + (P[1] - A[1]) * dy) / len2));
+        const cx = A[0] + t * dx - P[0];
+        const cy = A[1] + t * dy - P[1];
+        const d = Math.hypot(cx, cy);
+        const segLen = Math.sqrt(len2);
+        if (!best || d < best.d) {
+          const cross = dx * (P[1] - A[1]) - dy * (P[0] - A[0]);
+          best = { d, side: Math.sign(cross), key: `${li}:${Math.round((along + t * segLen) / 400)}` };
+        }
+        along += segLen;
+      }
+    });
+    if (!best) return null;
+    const b = best as { d: number; side: number; key: string };
+    return b.d > SIDE_MARGIN ? { side: b.side, key: b.key } : null;
+  };
+
+  let last: { side: number; key: string } | null = null;
+  for (const p of densify(route, 25)) {
+    if (haversine(p, start) < ignoreRadius || haversine(p, end) < ignoreRadius) {
+      last = null; // Fenster an den Enden: Seitenwechsel dort zählt nicht
+      continue;
+    }
+    const s = sideOf(p);
+    if (!s) continue; // nah an der Strecke: Seite unklar, weiter beobachten
+    // Seitenwechsel am selben Streckenabschnitt (± 400 m) = Queren
+    if (last && last.side !== s.side && sameStretch(last.key, s.key)) return true;
+    last = s;
+  }
+  return false;
+}
+
+function sameStretch(a: string, b: string): boolean {
+  const [la, ka] = a.split(':').map(Number);
+  const [lb, kb] = b.split(':').map(Number);
+  return la === lb && Math.abs(ka - kb) <= 1;
+}

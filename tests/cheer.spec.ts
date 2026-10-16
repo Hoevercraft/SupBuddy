@@ -150,3 +150,119 @@ test('Keine Zwischenziele bei kurzen oder nur geschätzten Wegen', () => {
   const mid: Route = { points: line(53, 1.2), distance: 1200, routed: true };
   expect(viaPoints(mid)).toHaveLength(1);
 });
+
+// ---------------------------------------------------------------- Queren der Strecke
+
+import { crossesCourse } from '../src/cheer';
+import { buildPlan } from '../src/plan';
+
+/** Strecke: gerade West→Ost bei lat 53,0 (10 km). */
+const ostWest: RaceEvent = {
+  name: 'OW',
+  date: '2026-08-23',
+  athletes: [jan],
+  legs: [{ name: 'Rad', discipline: 'rad', elevationGain: null, points: Array.from({ length: 101 }, (_, i) => ({ lat: 53, lng: 10 + (0.15 * i) / 100 })) }],
+};
+const dLat = (m: number) => m / 111_195; // Meter → Grad Breite
+
+test('Ankommen von der Seite und an der Strecke entlang ist kein Queren', () => {
+  // Von Süden an die Strecke, dann 300 m an ihr entlang zum Ziel (Jans Fall bei Altenmedingen)
+  const route = [
+    { lat: 53 - dLat(2000), lng: 10.05 },
+    { lat: 53 - dLat(5), lng: 10.05 },
+    { lat: 53 - dLat(5), lng: 10.0545 },
+  ];
+  expect(crossesCourse(ostWest, route)).toBe(false);
+});
+
+test('Von Süden nach Norden über die Strecke = Queren', () => {
+  const route = [
+    { lat: 53 - dLat(1500), lng: 10.05 },
+    { lat: 53 + dLat(1500), lng: 10.05 },
+    { lat: 53 + dLat(1500), lng: 10.1 },
+    { lat: 53 + dLat(5), lng: 10.1 },
+  ];
+  expect(crossesCourse(ostWest, route)).toBe(true);
+});
+
+test('Seitenwechsel direkt am Ziel zählt nicht (man will ja an die Strecke)', () => {
+  const route = [
+    { lat: 53 - dLat(1500), lng: 10.05 },
+    { lat: 53 - dLat(50), lng: 10.05 },
+    { lat: 53 + dLat(60), lng: 10.05 },
+  ];
+  expect(crossesCourse(ostWest, route)).toBe(false);
+});
+
+test('Wege abseits der Strecke queren nichts; Schwimmen zählt nicht', () => {
+  const far = [{ lat: 53.2, lng: 10.0 }, { lat: 53.3, lng: 10.2 }];
+  expect(crossesCourse(ostWest, far)).toBe(false);
+  const swim: RaceEvent = { ...ostWest, legs: [{ ...ostWest.legs[0], discipline: 'schwimmen' }] };
+  expect(crossesCourse(swim, [{ lat: 53 - dLat(1500), lng: 10.05 }, { lat: 53 + dLat(1500), lng: 10.05 }])).toBe(false);
+});
+
+test('Routing: direkter Weg ohne Queren wird ohne Sperrlinien genommen', async () => {
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    calls.push(String(url));
+    const coords = [[10.05, 53 - dLat(2000)], [10.05, 53 - dLat(5)], [10.0545, 53 - dLat(5)]];
+    return new Response(JSON.stringify({ features: [{ properties: { 'track-length': '2300' }, geometry: { coordinates: coords } }] }));
+  }) as typeof fetch;
+  try {
+    const { fetchRoute } = await import('../src/routing');
+    const r = await fetchRoute(ostWest, { lat: 53 - dLat(2000), lng: 10.05 }, { lat: 53, lng: 10.0545 }, 'fuss');
+    expect(r?.distance).toBe(2300);
+    expect(r?.crosses).toBeFalsy();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).not.toContain('polylines');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('Routing: querender Weg → neu mit Sperrlinien; geht das nicht, wird Queren markiert', async () => {
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  const crossing = [[10.05, 53 - dLat(1500)], [10.05, 53 + dLat(1500)], [10.1, 53 + dLat(1500)], [10.1, 53 + dLat(5)]];
+  globalThis.fetch = (async (url: string) => {
+    calls.push(String(url));
+    if (String(url).includes('polylines')) return new Response('target island detected for section 0', { status: 400 });
+    return new Response(JSON.stringify({ features: [{ properties: { 'track-length': '6000' }, geometry: { coordinates: crossing } }] }));
+  }) as typeof fetch;
+  try {
+    const { fetchRoute } = await import('../src/routing');
+    const r = await fetchRoute(ostWest, { lat: 53 - dLat(1500), lng: 10.05 }, { lat: 53 + dLat(5), lng: 10.1 }, 'rad');
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain('polylines');
+    expect(r?.crosses).toBe(true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('Nachplanen: ein einzelner extremer Umweg leert den Plan nicht (Jans Fall)', async () => {
+  // Läufer-Strecke; der erste angefragte Weg ist absurd lang (×6), alle anderen normal (×1,3)
+  const ev: RaceEvent = { ...lauf, athletes: [{ ...jan, start: '10:00' }] };
+  const start = { lat: 53 + 5 / 111.195, lng: 10.02 }; // ~1,3 km neben km 5
+  let first = true;
+  const fetcher = async (a: Point, b: Point) => {
+    const f = first ? 6 : 1.3;
+    first = false;
+    return { points: [a, b], distance: haversine(a, b) * f, routed: true };
+  };
+  const plan = await buildPlan(ev, { athleteIndex: 0, mode: 'fuss', speed: 4.5, maxStops: 1 }, start, at('09:50'), fetcher);
+  expect(plan.stops.length).toBe(1);
+  expect(plan.stops[0].tight).toBe(false);
+});
+
+test('Knappe Stopps am Ende werden abgeschnitten, sichere bleiben', async () => {
+  const ev: RaceEvent = { ...lauf, athletes: [{ ...jan, start: '10:00', pace: { ...jan.pace, lauf: 390 } }] };
+  const start = { lat: 53 + 2 / 111.195, lng: 10.015 };
+  // Erster Weg normal, alle weiteren extrem lang → nach dem ersten Stopp geht nichts mehr sicher
+  let n = 0;
+  const fetcher = async (a: Point, b: Point) => ({ points: [a, b], distance: haversine(a, b) * (n++ === 0 ? 1.3 : 20), routed: true });
+  const plan = await buildPlan(ev, { athleteIndex: 0, mode: 'rad', speed: 15, maxStops: 3 }, start, at('09:50'), fetcher);
+  expect(plan.stops.length).toBeGreaterThanOrEqual(1);
+  expect(plan.stops.every((s) => !s.tight)).toBe(true);
+});

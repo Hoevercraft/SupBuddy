@@ -59,31 +59,47 @@ export async function buildPlan(
     return r;
   };
 
+  // Echte Wegzeiten je Wegstück merken: Nachplanen nutzt sie direkt, statt einen einzelnen
+  // Ausreißer als Umwegfaktor auf alle Wege hochzurechnen.
+  const key = (a: Point, b: Point) => `${a.lat},${a.lng}>${b.lat},${b.lng}`;
+  const realTravel = new Map<string, number>();
+  const ratios: number[] = [];
   let detour = DETOUR;
-  let result: PlannedStop[] = [];
-  for (let round = 0; round < 3; round++) {
-    const stops = planStops({ candidates: cands, timeline: tl, start, startTime, maxStops: settings.maxStops, travel: estimateTravel(settings.speed, detour) });
-    // Mit echten Wegen nachrechnen
-    result = [];
+  let best: PlannedStop[] = [];
+  const score = (r: PlannedStop[]) => r.filter((s) => !s.tight).length * 10 + r.length;
+
+  for (let round = 0; round < 4; round++) {
+    const estimate = estimateTravel(settings.speed, detour);
+    const travel = (a: Point, b: Point) => realTravel.get(key(a, b)) ?? estimate(a, b);
+    const stops = planStops({ candidates: cands, timeline: tl, start, startTime, maxStops: settings.maxStops, travel });
+    const result: PlannedStop[] = [];
     let pos = start;
     let time = startTime;
-    let worst = 1;
     for (const s of stops) {
       const route = await getRoute(pos, s.candidate.point);
-      const travel = route.distance / v;
-      const arrive = time + travel * 1000;
-      const tight = arrive + ARRIVAL_BUFFER_MS > s.pass;
-      result.push({ ...s, travel, arrive, depart: s.pass + LINGER_MS, route, tight });
-      const est = s.travel || 1;
-      worst = Math.max(worst, travel / est);
+      const t = route.distance / v;
+      if (route.routed && !realTravel.has(key(pos, s.candidate.point))) {
+        realTravel.set(key(pos, s.candidate.point), t);
+        const straight = estimateTravel(settings.speed, 1)(pos, s.candidate.point);
+        if (straight > 0) ratios.push(t / straight);
+      }
+      const arrive = time + t * 1000;
+      result.push({ ...s, travel: t, arrive, depart: s.pass + LINGER_MS, route, tight: arrive + ARRIVAL_BUFFER_MS > s.pass });
       pos = s.candidate.point;
       time = Math.max(arrive, s.pass) + LINGER_MS;
     }
+    if (score(result) > score(best)) best = result;
     if (!result.some((s) => s.tight)) break;
-    detour *= worst * 1.05;
+    // Umwegfaktor für noch ungeprüfte Wege: typischer Wert (Median) – erst ab 3 echten Wegen
+    // und gedeckelt, damit einzelne Ausreißer (z. B. „Insel“-Umwege) nicht alles unerreichbar machen.
+    // Die bekannten Wege selbst stecken schon exakt in realTravel.
+    const sorted = [...ratios].sort((a, b) => a - b);
+    if (sorted.length >= 3) detour = Math.min(2.2, Math.max(DETOUR, sorted[Math.floor(sorted.length / 2)]));
   }
-  // Bleibt ein Stopp knapp, wird er als „knapp“ angezeigt statt stillschweigend gestrichen
-  // (spätere Wege bauen auf ihm auf).
+  // Ab dem ersten knappen Stopp ist der Rest des Plans nicht verlässlich → abschneiden,
+  // sofern davor schon mindestens ein sicherer Stopp liegt.
+  const firstTight = best.findIndex((s) => s.tight);
+  const result = firstTight > 0 ? best.slice(0, firstTight) : best;
   return { settings, start, startTime, stops: result, estimated: result.some((s) => !s.route.routed) };
 }
 

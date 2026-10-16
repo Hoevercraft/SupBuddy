@@ -70,12 +70,14 @@ test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne S
   }
   await expectOnScreen(stops.first().getByRole('button', { name: 'Weg zeigen' }), 30);
 
-  // Routing: Fahrrad-Profil, Strecke als Sperre
-  expect(urls.length).toBe(n);
-  for (const u of urls) {
+  // Routing: Fahrrad-Profil; je Weg erst direkt, mit Sperrlinien nur als zweiter Versuch für denselben Weg
+  expect(urls.length).toBeGreaterThanOrEqual(n);
+  const lonlats = (u: string) => new URL(u).searchParams.get('lonlats');
+  urls.forEach((u, i) => {
     expect(u).toContain('profile=trekking');
-    expect(u).toContain('&polylines=');
-  }
+    if (u.includes('&polylines=')) expect(lonlats(urls[i - 1])).toBe(lonlats(u));
+    else expect(u).not.toContain('polylines');
+  });
 
   // Karte: nummerierte Stopps im Bild, Wege gezeichnet
   await expect(page.getByTestId('stop-pin')).toHaveCount(n);

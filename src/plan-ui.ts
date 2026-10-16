@@ -151,6 +151,7 @@ function planResult(ev: RaceEvent, plan: Plan, now: number): string {
           <div class="stop-main">
             <div class="stop-title">${esc(title)}${stop.tight ? ' <span class="badge-tight">wird knapp</span>' : ''}</div>
             <div class="stop-way">${esc(way)}</div>
+            ${stop.route.crosses ? '<div class="stop-cross" data-testid="stop-cross">⚠ Weg quert die Strecke – ohne Queren gibt es hier keinen Weg. Nur queren, wenn gerade niemand kommt bzw. Ordner es erlauben.</div>' : ''}
             <div class="stop-arrive" data-testid="stop-arrive">Los ${clock(leave)}${i === 0 ? ` (${esc(relative(leave, now))})` : ''} · an ca. ${clock(stop.arrive)}</div>
             <ul class="stop-athletes">${times}</ul>
             ${via.length ? `<p class="stop-via">Navi führt über ${via.length} Zwischenziel${via.length > 1 ? 'e' : ''} auf diesem Weg.</p>` : ''}
