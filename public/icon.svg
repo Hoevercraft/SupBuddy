@@ -1,9 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0b1d2a"/>
-  <path d="M0 340 Q64 310 128 340 T256 340 T384 340 T512 340 V512 H0 Z" fill="#2bb3c0" opacity=".55"/>
-  <rect x="136" y="300" width="240" height="30" rx="15" fill="#e8f1f5"/>
-  <g transform="rotate(20 256 200)">
-    <rect x="248" y="110" width="16" height="190" rx="8" fill="#2bb3c0"/>
-    <ellipse cx="256" cy="110" rx="26" ry="50" fill="#2bb3c0"/>
+  <!-- Startnummer-Gelb wie in der App; Megafon = anfeuern, orange Linie = Rennstrecke -->
+  <rect width="512" height="512" rx="104" fill="#FFD23F"/>
+  <!-- Strecke -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M70 420 C 160 360, 250 460, 340 405 S 430 360, 450 365" stroke="#FFFFFF" stroke-width="44"/>
+    <path d="M70 420 C 160 360, 250 460, 340 405 S 430 360, 450 365" stroke="#FF8A3D" stroke-width="26"/>
+  </g>
+  <!-- Megafon mit Schallwellen, mittig (bleibt auch bei runder Maske sichtbar) -->
+  <g transform="translate(36 22) scale(0.86)">
+    <g transform="rotate(-14 240 230)" fill="#14213D">
+      <rect x="112" y="196" width="58" height="76" rx="14"/>
+      <path d="M160 200 L318 128 Q332 122 332 138 L332 330 Q332 346 318 340 L160 268 Z"/>
+      <path d="M178 268 L206 268 L226 336 Q230 350 216 350 L198 350 Q188 350 185 340 Z"/>
+    </g>
+    <g fill="none" stroke="#14213D" stroke-width="24" stroke-linecap="round">
+      <path d="M370 160 Q402 210 388 266"/>
+      <path d="M414 128 Q458 210 436 292"/>
+    </g>
   </g>
 </svg>
