@@ -3,7 +3,8 @@ import { candidates, estimateTravel, nogoLines, planStops, ARRIVAL_BUFFER_MS } f
 import { legDistance } from '../src/course';
 import { haversine } from '../src/geo';
 import type { Athlete, Leg, Point, RaceEvent } from '../src/model';
-import { appleMapsUrl, googleMapsUrl, routeUrl } from '../src/routing';
+import { appleMapsUrl, googleMapsUrl, routeUrl, viaPoints, type Route } from '../src/routing';
+import { nearestOnPath } from '../src/geo';
 import { timeline } from '../src/schedule';
 
 /* Reine Logik-Tests für den Anfeuer-Plan. */
@@ -108,9 +109,44 @@ test('Routing-URL: Profil je Fortbewegung, Sperrlinien dabei, nicht zu lang', ()
   expect(legDistance(long.legs[0])).toBeGreaterThan(170_000);
 });
 
-test('Navi-Links', () => {
+test('Navi-Links: Ziel, Verkehrsmittel und Zwischenziele', () => {
   const p = { lat: 53.30031, lng: 10.41172 };
+  const via = [{ lat: 53.29, lng: 10.4 }, { lat: 53.28, lng: 10.39 }];
   expect(googleMapsUrl(p, 'rad')).toBe('https://www.google.com/maps/dir/?api=1&destination=53.300310,10.411720&travelmode=bicycling');
-  expect(googleMapsUrl(p, 'fuss')).toContain('travelmode=walking');
-  expect(appleMapsUrl(p, 'fuss')).toBe('https://maps.apple.com/?daddr=53.300310,10.411720&dirflg=w');
+  expect(googleMapsUrl(p, 'fuss', via)).toBe(
+    'https://www.google.com/maps/dir/?api=1&destination=53.300310,10.411720&travelmode=walking&waypoints=53.290000,10.400000%7C53.280000,10.390000',
+  );
+  expect(appleMapsUrl(p, 'rad', via)).toBe(
+    'https://maps.apple.com/directions?destination=53.300310,10.411720&waypoint=53.290000,10.400000&waypoint=53.280000,10.390000&mode=cycling',
+  );
+  expect(appleMapsUrl(p, 'fuss')).toBe('https://maps.apple.com/directions?destination=53.300310,10.411720&mode=walking');
+  expect(appleMapsUrl(p, 'scooter')).toContain('mode=cycling');
+  // Nie mehr als 3 Zwischenziele (Grenze von Google Maps im Handy-Browser)
+  const many = Array.from({ length: 6 }, (_, i) => ({ lat: 53 + i / 100, lng: 10 }));
+  expect(googleMapsUrl(p, 'rad', many).split('%7C')).toHaveLength(3);
+  expect(appleMapsUrl(p, 'rad', many).match(/waypoint=/g)).toHaveLength(3);
+});
+
+test('Zwischenziele liegen gleichmäßig auf der berechneten Route', () => {
+  // L-förmiger Weg: 4 km nach Norden, dann 4 km nach Osten (Navi würde diagonal abkürzen)
+  const north = Array.from({ length: 41 }, (_, i) => ({ lat: 53 + (4 / 111.195) * (i / 40), lng: 10 }));
+  const corner = north[40];
+  const east = Array.from({ length: 41 }, (_, i) => ({ lat: corner.lat, lng: 10 + (4 / (111.195 * Math.cos((corner.lat * Math.PI) / 180))) * (i / 40) }));
+  const route: Route = { points: [...north, ...east.slice(1)], distance: 8000, routed: true };
+  const via = viaPoints(route);
+  expect(via).toHaveLength(3);
+  for (const v of via) expect(nearestOnPath(route.points, v)!.distance).toBeLessThan(5);
+  const along = via.map((v) => nearestOnPath(route.points, v)!.along);
+  expect(along[0]).toBeCloseTo(2000, -2);
+  expect(along[1]).toBeCloseTo(4000, -2); // genau an der Ecke
+  expect(along[2]).toBeCloseTo(6000, -2);
+});
+
+test('Keine Zwischenziele bei kurzen oder nur geschätzten Wegen', () => {
+  const short: Route = { points: line(53, 0.5).slice(0, 101), distance: 250, routed: true };
+  expect(viaPoints(short)).toEqual([]);
+  const est: Route = { points: [{ lat: 53, lng: 10 }, { lat: 53.1, lng: 10 }], distance: 11_000, routed: false };
+  expect(viaPoints(est)).toEqual([]);
+  const mid: Route = { points: line(53, 1.2), distance: 1200, routed: true };
+  expect(viaPoints(mid)).toHaveLength(1);
 });

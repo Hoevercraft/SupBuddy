@@ -130,17 +130,35 @@ test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne S
   await context.close();
 });
 
-test('Navigation öffnet die passende Karten-App mit dem Stopp als Ziel', async ({ page, browserName }) => {
+test('Navigation: Karten-App bekommt Ziel, Rad-Modus und Zwischenziele auf unserer Route', async ({ browser }) => {
+  const context = await browser.newContext({ geolocation: INSIDE_EAST, permissions: ['geolocation'], serviceWorkers: 'block' });
+  const page = await context.newPage();
   await mockRouting(page);
   await setup(page);
+  await page.getByRole('button', { name: 'Standort anzeigen' }).click();
+  await expect(page.getByTestId('user-dot')).toHaveCount(1);
   await page.getByRole('button', { name: 'E-Scooter' }).click();
   await expect(page.getByLabel('Dein Tempo in km/h')).toHaveValue('18');
   await makePlan(page);
-  const href = (await page.getByTestId('stop-nav').first().getAttribute('href'))!;
+  const first = page.getByTestId('stop').first();
+  const href = (await first.getByTestId('stop-nav').getAttribute('href'))!;
   const ua = await page.evaluate(() => navigator.userAgent);
-  if (/iPhone/.test(ua)) expect(href).toMatch(/^https:\/\/maps\.apple\.com\/\?daddr=5\d\.\d{6},10\.\d{6}$/);
-  else expect(href).toMatch(/^https:\/\/www\.google\.com\/maps\/dir\/\?api=1&destination=5\d\.\d{6},10\.\d{6}&travelmode=bicycling$/);
-  expect(browserName).toBeTruthy();
+  const coord = '5\\d\\.\\d{6},10\\.\\d{6}';
+  if (/iPhone/.test(ua)) {
+    await expect(first.getByTestId('stop-nav')).toHaveText('Apple Karten');
+    expect(href).toMatch(new RegExp(`^https://maps\\.apple\\.com/directions\\?destination=${coord}(&waypoint=${coord})*&mode=cycling$`));
+    // Auf dem iPhone zusätzlich Google Maps
+    const g = (await first.getByTestId('stop-nav-google').getAttribute('href'))!;
+    expect(g).toContain('travelmode=bicycling');
+  } else {
+    await expect(first.getByTestId('stop-nav')).toHaveText('Navigation');
+    expect(href).toMatch(new RegExp(`^https://www\\.google\\.com/maps/dir/\\?api=1&destination=${coord}&travelmode=bicycling(&waypoints=${coord}(%7C${coord})*)?$`));
+  }
+  // Die Attrappe liefert für Wege > 600 m eine geknickte Route → mindestens ein Stopp hat Zwischenziele
+  const all = await page.getByTestId('stop-nav').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
+  expect(all.some((h) => /waypoints?=/.test(h))).toBe(true);
+  await expect(page.locator('.stop-via').first()).toContainText('Zwischenziel');
+  await context.close();
 });
 
 test('Zu Fuß von weit weg: verständlicher Hinweis statt leerem Plan', async ({ browser }) => {
