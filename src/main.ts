@@ -5,12 +5,13 @@ import '@fontsource/barlow-condensed/800.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { athleteDialogHtml, athletesNow, athletesSection, initials, openAthleteDialog, readAthleteForm } from './athletes-ui';
-import { courseStats, legDistance, nearestOnCourse } from './course';
-import { MODES, type Mode } from './cheer';
+import { courseStats, legDistance, nearestOnCourse, type CourseNearest } from './course';
+import { DETOUR, MODES, type Mode } from './cheer';
 import { isoDate } from './format';
 import { buildPlan, type Plan, type PlanSettings } from './plan';
 import { loadSettings, planSection, saveSettings } from './plan-ui';
-import { fetchRoute } from './routing';
+import { estimatedRoute, fetchRoute, type Route } from './routing';
+import { pickHtml } from './pick-ui';
 import { formatDistance, formatKm, haversine } from './geo';
 import { GpxError, parseGpx } from './gpx';
 import { DISCIPLINES, eventKind, type Discipline, type Point, type RaceEvent } from './model';
@@ -30,6 +31,11 @@ let plan: Plan | null = null;
 let planBusy = false;
 let planSettings: PlanSettings | null = null;
 let courseMap: import('./map').CourseMap | null = null;
+/** Angetippter Streckenpunkt (Karte am Punkt) */
+let pick: { n: CourseNearest; route: Route | null; arrive: number | null; busy: boolean; locating: boolean; anchor: 'top' | 'bottom' } | null = null;
+const pickEl = document.createElement('div');
+/** Panel wurde für die Punkt-Karte eingeklappt (kleiner Bildschirm) → beim Schließen wieder zeigen */
+let pickHidSheet = false;
 
 // ---------------------------------------------------------------- Hilfen
 
@@ -165,6 +171,7 @@ function renderSheet(): void {
     ${positionText()}
     ${athletesSection(event, position, Date.now())}
     ${planSection(event, { settings: currentPlanSettings(), plan, busy: planBusy, fromPosition: !!position, now: Date.now() })}
+    <p class="hint pick-tip" data-testid="pick-tip">Tipp: Tippe auf die Strecke – du siehst, wann deine Athleten dort sind, und den Weg dorthin.</p>
     <h3 class="sheet-sub">Strecke</h3>
     <ul class="legs">${legs}</ul>
     <div class="actions">
@@ -276,9 +283,93 @@ async function createPlan(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------- Punkt antippen
+
+function renderPick(): void {
+  if (!event || !pick || !courseMap) return;
+  const s = currentPlanSettings();
+  pickEl.innerHTML = pickHtml(event, {
+    n: pick.n,
+    mode: s.mode,
+    speed: s.speed,
+    athleteIndex: s.athleteIndex,
+    route: pick.route,
+    arrive: pick.arrive,
+    busy: pick.busy,
+    locating: pick.locating,
+    hasPosition: !!position,
+    now: Date.now(),
+  });
+  courseMap.showPick(pick.n.point, pickEl, pick.anchor);
+}
+
+function openPick(n: CourseNearest): void {
+  pick = { n, route: null, arrive: null, busy: false, locating: false, anchor: 'bottom' };
+  // Wenig Platz über dem Panel (Handy): Panel einklappen, damit Karte, Hinweis und Weg Platz haben
+  const pad = visiblePadding();
+  if (!mapOnly && window.innerHeight - pad.top - pad.bottom < 480) {
+    setMapOnly(true);
+    pickHidSheet = true;
+  }
+  courseMap?.setPickRoute(null);
+  renderPick();
+}
+
+async function routePick(): Promise<void> {
+  if (!event || !pick || pick.busy) return;
+  if (!position) {
+    pick.locating = true;
+    renderPick();
+    courseMap?.locate();
+    return;
+  }
+  const ev = event;
+  const current = pick;
+  const from = position;
+  const { mode, speed } = currentPlanSettings();
+  current.busy = true;
+  renderPick();
+  const route = (await fetchRoute(ev, from, current.n.point, mode)) ?? estimatedRoute(from, current.n.point, DETOUR);
+  if (pick !== current || event !== ev) return; // inzwischen anderer Punkt oder anderes Rennen
+  current.busy = false;
+  current.route = route;
+  current.arrive = Date.now() + (route.distance / (speed / 3.6)) * 1000;
+  // Hinweis auf die Seite, von der der Weg nicht kommt (sonst verdeckt er ihn)
+  current.anchor = from.lat > current.n.point.lat ? 'top' : 'bottom';
+  courseMap?.setPickRoute(route.points);
+  renderPick();
+  courseMap?.fitPick([from, ...route.points]);
+  document.body.dataset.picked = String(Date.now());
+}
+
+function bindPick(): void {
+  pickEl.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const m = t.closest<HTMLElement>('[data-pick-mode]');
+    if (m && pick) {
+      const mode = m.dataset.pickMode as Mode;
+      if (mode === currentPlanSettings().mode) return;
+      updatePlanSettings({ mode, speed: MODES[mode].kmh });
+      const hadRoute = !!pick.route;
+      pick.route = null;
+      pick.arrive = null;
+      courseMap?.setPickRoute(null);
+      renderPick();
+      // Plan-Bereich mitziehen, ohne das Panel neu aufzubauen (dort wird evtl. gerade getippt)
+      document.querySelectorAll<HTMLElement>('#sheet [data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+      const speedInput = document.querySelector<HTMLInputElement>('#plan-speed');
+      if (speedInput) speedInput.value = String(MODES[mode].kmh).replace('.', ',');
+      if (hadRoute) void routePick();
+    } else if (t.closest('[data-testid="pick-go"]')) {
+      void routePick();
+    }
+  });
+}
+
 async function setEvent(ev: RaceEvent | null, fit = true): Promise<void> {
   // Strecke oder Athleten geändert → alter Plan passt nicht mehr
   if (plan) clearPlan();
+  courseMap?.closePick();
   event = ev && ev.legs.length > 0 ? ev : null;
   render(fit);
   await saveEvent(event);
@@ -484,10 +575,29 @@ async function start(): Promise<void> {
         const moved = first || haversine(position!, p!) > 15;
         position = p;
         if (first || (moved && !sheetBusy())) renderSheet();
+        // Weg zum angetippten Punkt wartete auf den Standort
+        if (pick?.locating) {
+          pick.locating = false;
+          if (p) void routePick();
+          else {
+            renderPick();
+            toast('Standort nicht verfügbar. Erlaube den Standortzugriff und versuch es nochmal.', 'error');
+          }
+        }
       },
-      onToggleMapOnly: () => setMapOnly(!mapOnly),
+      onToggleMapOnly: () => {
+        pickHidSheet = false; // selbst umgeschaltet → so lassen
+        setMapOnly(!mapOnly);
+      },
       getPadding: visiblePadding,
+      onCoursePick: openPick,
+      onPickClose: () => {
+        pick = null;
+        if (pickHidSheet && mapOnly) setMapOnly(false);
+        pickHidSheet = false;
+      },
     });
+    bindPick();
     // Beim Standort-Fix sollen auch die Athleten (bzw. die Strecke) ins Bild
     courseMap.focusPoints = (me) => {
       if (!event) return [];
