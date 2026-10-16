@@ -42,6 +42,19 @@ export function compassHeading(e: OrientationLike, screenAngle: number): number 
   return null;
 }
 
+/**
+ * Drehung des Bildschirms (0 = Hochformat). Manche Umgebungen melden im Hochformat 90°
+ * – passt der Wert nicht zum Seitenverhältnis, gilt Hochformat.
+ */
+export function screenAngle(
+  reported: number | undefined = typeof screen !== 'undefined' ? (screen.orientation?.angle ?? (window as unknown as { orientation?: number }).orientation) : 0,
+  portrait: boolean = typeof window !== 'undefined' ? window.innerHeight >= window.innerWidth : true,
+): number {
+  const a = norm(Number(reported) || 0);
+  if (portrait && (a === 90 || a === 270)) return 0;
+  return a;
+}
+
 /** Halber Öffnungswinkel des Kegels: ungenauer Kompass → breiter Kegel. */
 export function coneHalfAngle(accuracy: number | undefined): number {
   if (typeof accuracy !== 'number' || accuracy < 0) return 28;
@@ -109,8 +122,7 @@ export class HeadingTracker {
   }
 
   private onOrientation(e: OrientationLike): void {
-    const angle = screen.orientation?.angle ?? Number((window as unknown as { orientation?: number }).orientation ?? 0);
-    const deg = compassHeading(e, angle);
+    const deg = compassHeading(e, screenAngle());
     if (deg === null) return;
     this.state.compass = { deg, at: Date.now(), accuracy: e.webkitCompassAccuracy };
     this.emit();

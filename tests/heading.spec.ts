@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { chooseHeading, compassHeading, coneHalfAngle, smooth, COMPASS_HOLD_MS, GPS_HOLD_MS } from '../src/heading';
+import { chooseHeading, compassHeading, coneHalfAngle, screenAngle, smooth, COMPASS_HOLD_MS, GPS_HOLD_MS } from '../src/heading';
 import { fixture, openApp } from './helpers';
 
 /* Blickrichtung (Kegel am eigenen Standort). */
@@ -12,6 +12,14 @@ test.describe('Logik', () => {
     expect(compassHeading({ alpha: 270, absolute: true }, 90)).toBe(180); // Querformat: Oberkante zeigt woanders hin
     expect(compassHeading({ alpha: 120, absolute: false }, 0)).toBeNull(); // relativ → unbrauchbar
     expect(compassHeading({ alpha: null, webkitCompassHeading: -1 }, 0)).toBeNull(); // iOS: ungültig
+  });
+
+  test('Bildschirmdrehung: unplausible Werte im Hochformat werden ignoriert', () => {
+    expect(screenAngle(0, true)).toBe(0);
+    expect(screenAngle(90, true)).toBe(0);
+    expect(screenAngle(180, true)).toBe(180);
+    expect(screenAngle(90, false)).toBe(90);
+    expect(screenAngle(-90, false)).toBe(270);
   });
 
   test('Glätten dreht über den kürzeren Weg', () => {
@@ -54,14 +62,24 @@ async function grantCompass(page: Page) {
   });
 }
 
-/** Kompass-Ereignis wie vom Gerät (Android: alpha + absolute, iOS: webkitCompassHeading). */
-async function compass(page: Page, fields: Record<string, number | boolean>) {
+/**
+ * Kompass wie vom Gerät: sendet laufend (alle 100 ms) Ereignisse – Android: alpha + absolute,
+ * iOS: webkitCompassHeading. null hält den Kompass an.
+ */
+async function compass(page: Page, fields: Record<string, number | boolean> | null) {
   await page.evaluate((f) => {
-    for (const type of ['deviceorientation', 'deviceorientationabsolute']) {
-      const e = new Event(type);
-      Object.assign(e, { alpha: null, ...f });
-      window.dispatchEvent(e);
-    }
+    const w = window as unknown as { __compassTimer?: number };
+    clearInterval(w.__compassTimer);
+    if (!f) return;
+    const send = () => {
+      for (const type of ['deviceorientation', 'deviceorientationabsolute']) {
+        const e = new Event(type);
+        Object.assign(e, { alpha: null, ...f });
+        window.dispatchEvent(e);
+      }
+    };
+    send();
+    w.__compassTimer = window.setInterval(send, 100);
   }, fields);
 }
 
@@ -88,6 +106,7 @@ async function conePixels(page: Page, dx: number, dy: number): Promise<number> {
 }
 
 test('Kompass dreht den Kegel am eigenen Standort; ohne Kompass kein Kegel', async ({ browser }, info) => {
+  test.slow();
   const context = await browser.newContext({ ...info.project.use, geolocation: ME, permissions: ['geolocation'], serviceWorkers: 'block' });
   const page = await context.newPage();
   await grantCompass(page);
@@ -115,13 +134,14 @@ test('Kompass dreht den Kegel am eigenen Standort; ohne Kompass kein Kegel', asy
   expect(await conePixels(page, -1, 0)).toBeLessThan(15);
   expect(await conePixels(page, 0, -1)).toBeLessThan(15);
 
-  // Blick nach Süden (iOS-Wert): mehrere Werte → der Kegel zieht weich nach
-  for (let i = 0; i < 25; i++) await compass(page, { webkitCompassHeading: 180 });
+  // Blick nach Süden (iOS-Wert): der Kegel zieht weich nach
+  await compass(page, { webkitCompassHeading: 180 });
   await expect(page.getByTestId('user-dot')).toHaveAttribute('data-heading', /^(179|180|181)$/);
   await expect.poll(() => conePixels(page, 0, 1), { timeout: 10_000 }).toBeGreaterThan(150);
   expect(await conePixels(page, 1, 0)).toBeLessThan(15);
 
   // Kompass verstummt → Kegel verschwindet (lieber keiner als ein falscher)
+  await compass(page, null);
   await page.clock.runFor(COMPASS_HOLD_MS + 1500);
   await expect(cone).toBeHidden();
   await context.close();
