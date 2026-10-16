@@ -331,7 +331,7 @@ export class CourseMap {
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 3, 15, 6],
       },
     });
-    // Wege zu den Anfeuer-Stopps: gestrichelt in Tintenblau, über der Strecke
+    // Wege zu den Anfeuer-Stopps: Indigo mit weißem Rand, über der Strecke
     this.map.addSource('plan-routes', { type: 'geojson', data: this.planGeoJSON });
     this.map.addLayer({
       id: 'plan-routes-casing',
@@ -345,7 +345,8 @@ export class CourseMap {
       type: 'line',
       source: 'plan-routes',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': PLAN_COLOR, 'line-width': 5, 'line-dasharray': [1.6, 1] },
+      // Durchgezogen statt gestrichelt: gestrichelte Linien rendern manche Grafiktreiber nicht zuverlässig
+      paint: { 'line-color': PLAN_COLOR, 'line-width': 5 },
     });
   }
 
