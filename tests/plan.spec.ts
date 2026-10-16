@@ -81,10 +81,19 @@ test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne S
   await expect(page.getByTestId('stop-pin')).toHaveCount(n);
   await page.getByRole('button', { name: 'Vollbild', exact: true }).click();
   const vp = page.viewportSize()!;
-  for (const pin of await page.getByTestId('stop-pin').all()) {
-    const b = (await pin.boundingBox())!;
-    expect(b.x >= 0 && b.y >= 0 && b.x + b.width <= vp.width && b.y + b.height <= vp.height, 'Stopp außerhalb des Bildes').toBe(true);
-  }
+  // Die Karte fährt animiert zum Ausschnitt → prüfen, sobald sie steht
+  await expect
+    .poll(
+      async () => {
+        for (const pin of await page.getByTestId('stop-pin').all()) {
+          const b = await pin.boundingBox();
+          if (!b || b.x < 0 || b.y < 0 || b.x + b.width > vp.width || b.y + b.height > vp.height) return 'Stopp außerhalb des Bildes';
+        }
+        return 'ok';
+      },
+      { timeout: 5000 },
+    )
+    .toBe('ok');
   let px = 0;
   try {
     await expect
