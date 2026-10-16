@@ -87,3 +87,37 @@ export async function openApp(page: Page, hash = ''): Promise<void> {
   await page.goto(`/${hash}`);
   await page.locator('body[data-ready="true"]').waitFor();
 }
+
+/**
+ * BRouter-Attrappe: gerader Weg von A nach B, Länge = Luftlinie × factor.
+ * Gibt die Liste der angefragten URLs zurück (zum Prüfen von Profil und Sperrlinien).
+ */
+export async function mockRouting(page: Page, factor = 1.3, status = 200): Promise<string[]> {
+  const urls: string[] = [];
+  await page.route(/brouter\.de\/brouter/, async (route) => {
+    const url = route.request().url();
+    urls.push(url);
+    if (status !== 200) return route.fulfill({ status, body: 'down' });
+    const lonlats = new URL(url).searchParams.get('lonlats')!.split('|').map((p) => p.split(',').map(Number));
+    const [[lng1, lat1], [lng2, lat2]] = lonlats;
+    const R = 6_371_000;
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const h =
+      Math.sin(rad(lat2 - lat1) / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(rad(lng2 - lng1) / 2) ** 2;
+    const dist = 2 * R * Math.asin(Math.sqrt(h)) * factor;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: { 'track-length': String(Math.round(dist)), 'total-time': '0' },
+            geometry: { type: 'LineString', coordinates: [[lng1, lat1, 0], [(lng1 + lng2) / 2, (lat1 + lat2) / 2 + 0.002, 0], [lng2, lat2, 0]] },
+          },
+        ],
+      }),
+    });
+  });
+  return urls;
+}

@@ -14,6 +14,9 @@ const FALLBACK_STYLE: StyleSpecification = {
   layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#E9EEF2' } }],
 };
 
+/** Farbe der Plan-Wege (für Pixelprüfung in Tests exportiert). */
+export const PLAN_COLOR = '#312E81';
+
 const GERMANY_CENTER: [number, number] = [10.45, 51.16];
 
 function courseGeoJSON(ev: RaceEvent | null): FeatureCollection {
@@ -181,6 +184,8 @@ export class CourseMap {
   private event: RaceEvent | null = null;
   private pins: maplibregl.Marker[] = [];
   private athletePins = new Map<string, maplibregl.Marker>();
+  private stopPins: maplibregl.Marker[] = [];
+  private planGeoJSON: FeatureCollection = { type: 'FeatureCollection', features: [] };
   private usingFallback = false;
   private mapOnlyToggle: MapOnlyToggle;
 
@@ -323,6 +328,44 @@ export class CourseMap {
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 3, 15, 6],
       },
     });
+    // Wege zu den Anfeuer-Stopps: gestrichelt in Tintenblau, über der Strecke
+    this.map.addSource('plan-routes', { type: 'geojson', data: this.planGeoJSON });
+    this.map.addLayer({
+      id: 'plan-routes-casing',
+      type: 'line',
+      source: 'plan-routes',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#FFFFFF', 'line-width': 7 },
+    });
+    this.map.addLayer({
+      id: 'plan-routes',
+      type: 'line',
+      source: 'plan-routes',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': PLAN_COLOR, 'line-width': 4, 'line-dasharray': [1.5, 1.2] },
+    });
+  }
+
+  /** Anfeuer-Plan anzeigen: nummerierte Stopps + Wege dorthin. Leere Liste = Plan entfernen. */
+  setPlan(stops: { point: Point }[], routes: Point[][]): void {
+    this.stopPins.forEach((m) => m.remove());
+    this.stopPins = stops.map((s, i) => {
+      const el = document.createElement('div');
+      el.className = 'stop-pin';
+      el.dataset.testid = 'stop-pin';
+      el.textContent = String(i + 1);
+      // Über dem Punkt, damit Start/Ziel-Schilder (unter dem Punkt) sichtbar bleiben
+      return new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -2] }).setLngLat([s.point.lng, s.point.lat]).addTo(this.map);
+    });
+    this.planGeoJSON = {
+      type: 'FeatureCollection',
+      features: routes.map((r) => ({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: r.map((p) => [p.lng, p.lat]) },
+      })),
+    };
+    (this.map.getSource('plan-routes') as GeoJSONSource | undefined)?.setData(this.planGeoJSON);
   }
 
   /** Athleten an ihre Plan-Position setzen (wiederverwendet Marker, damit nichts flackert). */
@@ -360,15 +403,15 @@ export class CourseMap {
     // Rundkurs: Start und Ziel liegen (fast) aufeinander → ein gemeinsamer Marker statt zwei verdeckter
     if (haversine(first, last) < 150) {
       this.pins.push(
-        new maplibregl.Marker({ element: pinElement('Start/Ziel', 'pin-start pin-finish') })
+        new maplibregl.Marker({ element: pinElement('Start/Ziel', 'pin-start pin-finish'), anchor: 'top', offset: [0, 4] })
           .setLngLat([first.lng, first.lat])
           .addTo(this.map),
       );
       return;
     }
     this.pins.push(
-      new maplibregl.Marker({ element: pinElement('Start', 'pin-start') }).setLngLat([first.lng, first.lat]).addTo(this.map),
-      new maplibregl.Marker({ element: pinElement('Ziel', 'pin-finish') }).setLngLat([last.lng, last.lat]).addTo(this.map),
+      new maplibregl.Marker({ element: pinElement('Start', 'pin-start'), anchor: 'top', offset: [0, 4] }).setLngLat([first.lng, first.lat]).addTo(this.map),
+      new maplibregl.Marker({ element: pinElement('Ziel', 'pin-finish'), anchor: 'top', offset: [0, 4] }).setLngLat([last.lng, last.lat]).addTo(this.map),
     );
   }
 }
