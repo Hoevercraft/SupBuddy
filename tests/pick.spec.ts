@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { countColorPixels, expectOnScreen, fixture, mockRouting, openApp, openSection } from './helpers';
+import { countColorPixels, warmUpScreenshots, expectOnScreen, fixture, mockRouting, openApp, openSection } from './helpers';
 
 /*
  * Auf die Strecke tippen: Karte am Punkt mit Durchgangszeiten, „Weg hierhin“ mit Urteil
@@ -189,7 +189,15 @@ test('Strecke antippen → Zeiten am Punkt, Weg hierhin mit Urteil, Weg auf der 
   // Weg wirklich gezeichnet (keine Plan-Wege vorhanden → Farbe stammt vom Tipp-Weg)
   await expect.poll(async () => (await mapState(page)).pickRoutes).toBe(1);
   await mapIdle(page);
-  await expect.poll(async () => countColorPixels(page, PLAN_COLOR, await mapArea(page), 45), { timeout: 25_000 }).toBeGreaterThan(60);
+  await warmUpScreenshots(page);
+  let routePx = 0;
+  try {
+    await expect.poll(async () => (routePx = await countColorPixels(page, PLAN_COLOR, await mapArea(page), 45)), { timeout: 25_000 }).toBeGreaterThan(60);
+  } catch (e) {
+    await page.screenshot({ path: info.outputPath('weg-fehlt.png') });
+    const st = await mapState(page);
+    throw new Error(`Weg nicht zu sehen (${routePx} Pixel, Bereich ${JSON.stringify(await mapArea(page))}). Weg auf dem Bildschirm: ${JSON.stringify(st.pickScreen)} · ${JSON.stringify({ ...st, courseScreen: undefined })} · ${e}`);
+  }
 
   // Schließen: Karte und Weg weg
   await page.locator('.pick-popup .maplibregl-popup-close-button').click();

@@ -21,7 +21,10 @@ test('Versionsanzeige: sichtbar unten, mit Commit und Build-Zeit', async ({ page
   for (const loaded of [false, true]) {
     if (loaded) {
       await page.locator('#file-input').setInputFiles(fixture('triathlon.gpx'));
-      await expect(page.getByTestId('leg')).toHaveCount(3);
+      await expect(page.locator('#event-kind')).toHaveText('Triathlon');
+      // Ohne offenen Bereich liegt unten die Leiste – die Version muss trotzdem lesbar sein
+      await page.getByRole('button', { name: 'Athleten schließen' }).click();
+      await expect(page.getByTestId('statusbar')).toBeVisible();
     }
     const vp = page.viewportSize()!;
     const box = (await version.boundingBox())!;

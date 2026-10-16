@@ -63,16 +63,16 @@ test('Bedienelemente sind sichtbar und nicht verdeckt', async ({ page }) => {
   await expectOnScreen(page.getByRole('button', { name: 'Standort anzeigen' }), 40);
   await expectOnScreen(page.getByRole('button', { name: 'Athlet hinzufügen' }), 40);
   for (const label of ['Athleten', 'Anfeuer-Plan', 'Strecke']) await expectOnScreen(page.locator(`.ctrl-section-btn[aria-label="${label}"]`), 24);
-  await openSection(page, 'Strecke');
-  await expect(page.getByTestId('leg')).toHaveCount(3);
-
   await expectOnScreen(page.locator('#event-name'));
   await expectOnScreen(page.getByTestId('total-distance'));
   await expectOnScreen(page.locator('.maplibregl-ctrl-geolocate'), 24);
   // Quellenhinweis der Karte (OpenStreetMap) muss sichtbar sein
   await expectOnScreen(page.locator('.maplibregl-ctrl-attrib'), 16);
+  // Strecke wird über dem offenen Bereich eingepasst: Start und Ziel frei sichtbar
   await expectOnScreen(page.locator('.pin-start'));
   await expectOnScreen(page.locator('.pin-finish'));
+  await openSection(page, 'Strecke');
+  await expect(page.getByTestId('leg')).toHaveCount(3);
   await expectOnScreen(page.getByRole('button', { name: 'Link teilen' }), 40);
   await expectOnScreen(page.getByRole('button', { name: 'Etappe hinzufügen' }), 40);
   for (const sel of await page.locator('.leg-discipline').all()) await expectOnScreen(sel);

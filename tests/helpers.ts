@@ -64,12 +64,25 @@ async function checkOnScreen(locator: Locator, minSize: number): Promise<void> {
  * Zählt auf einem Screenshot die Pixel in der Nähe einer Farbe.
  * So prüfen wir, ob die Strecke wirklich auf der Karte gezeichnet wird.
  */
+const warmed = new WeakSet<Page>();
+
+/** Ersten (langsamen) Screenshot vorab machen – vor expect.poll aufrufen. */
+export async function warmUpScreenshots(page: Page): Promise<void> {
+  if (warmed.has(page)) return;
+  await page.screenshot({ scale: 'css', timeout: 120_000 });
+  warmed.add(page);
+}
+
 export async function countColorPixels(
   page: Page,
   hex: string,
   clip?: { x: number; y: number; width: number; height: number },
   tolerance = 40,
 ): Promise<number> {
+  // Der erste Screenshot einer Seite kann mit Software-Grafik (CI, Sandbox) sehr lange dauern
+  // (beobachtet: 30–50 s, danach < 1 s; die Seite selbst läuft dabei flüssig weiter).
+  // Einmal vorab aufwärmen, damit Wartezeiten in expect.poll nicht daran scheitern.
+  await warmUpScreenshots(page);
   const png = (await page.screenshot({ clip, scale: 'css' })).toString('base64');
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
   return page.evaluate(

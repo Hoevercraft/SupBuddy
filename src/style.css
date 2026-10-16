@@ -521,7 +521,7 @@ body:not(.has-event) .ctrl-maponly { display: none; }
 .pick .stop-cross { margin: 0; font-size: 13px; }
 .pick-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .pick .seg { margin: 2px 0; }
-.seg-small .seg-btn { min-height: 32px; font-size: 14px; padding: 0 8px; }
+.seg-small .seg-btn { min-height: 34px; font-size: 13px; padding: 2px 4px; white-space: normal; line-height: 1.1; }
 .pick-go { justify-content: center; }
 .pick-tip { margin-top: 10px; }
 
@@ -596,6 +596,9 @@ body:not(.has-event) .ctrl-sections { display: none; }
   font: 15px/1.3 var(--font-body);
   color: var(--ink);
   cursor: pointer;
+  /* Eigene Ebene: sonst zeichnet der Browser die Leiste bei jeder Kartenanimation neu (sehr langsam bei Software-Grafik) */
+  will-change: transform;
+  contain: paint;
 }
 .status-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .status-list li { display: flex; align-items: center; gap: 8px; min-width: 0; }

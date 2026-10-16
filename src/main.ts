@@ -480,9 +480,11 @@ async function importFiles(files: FileList): Promise<void> {
     }
   }
   if (added > 0 && next) {
+    // Nächster Schritt nach dem Laden: Athleten eintragen. Vor setEvent öffnen,
+    // damit die Strecke in den Bereich über dem Panel eingepasst wird.
+    const openAthletes = next.athletes.length === 0 && !section;
+    if (openAthletes) section = 'athleten';
     await setEvent(next);
-    // Nächster Schritt nach dem Laden: Athleten eintragen
-    if (next.athletes.length === 0) setSection('athleten');
     toast(added === 1 ? 'Strecke geladen.' : `${added} Etappen geladen.`);
   }
 }
