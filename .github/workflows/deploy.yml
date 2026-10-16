@@ -27,8 +27,6 @@ jobs:
       - run: npm install
       - run: npx playwright install --with-deps chromium webkit
       - run: npm test
-      # TEMP Stresstest Punkt antippen – wird wieder entfernt
-      - run: npx playwright test tests/pick.spec.ts tests/plan.spec.ts --repeat-each=4 --retries=0
       # Bericht mit Screenshots immer hochladen, damit man das Ergebnis auch ansehen kann
       - uses: actions/upload-artifact@v4
         if: always()
