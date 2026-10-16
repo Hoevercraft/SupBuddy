@@ -15,6 +15,9 @@ test('Radrennen laden: Startnummer zeigt Name, Art und Länge', async ({ page })
   expect(total).toBeLessThan(38.2);
   await expect(page.getByTestId('leg')).toHaveCount(1);
   await expect(page.locator('.pin-start')).toBeVisible();
+  // Rundkurs: ein gemeinsamer Start/Ziel-Marker statt zwei übereinanderliegender
+  await expect(page.locator('.pin')).toHaveCount(1);
+  await expect(page.locator('.pin')).toHaveText('Start/Ziel');
 
   expect(errors).toEqual([]);
 });

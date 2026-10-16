@@ -1,7 +1,7 @@
 import type { FeatureCollection } from 'geojson';
 import maplibregl, { type GeoJSONSource, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { bounds } from './geo';
+import { bounds, haversine } from './geo';
 import { DISCIPLINES, type Point, type RaceEvent } from './model';
 
 /** Freie OSM-Vektorkarte ohne API-Key. */
@@ -90,21 +90,102 @@ function athleteElement(a: AthleteMarker): HTMLElement {
   return el;
 }
 
+/**
+ * Eigener Standort-Knopf statt MapLibres GeolocateControl:
+ * Der Punkt folgt dem Gerät (watchPosition), die Kamera aber nicht –
+ * den Ausschnitt bestimmt die App (dich + Athleten im Bild).
+ */
+class LocateControl implements maplibregl.IControl {
+  private container = document.createElement('div');
+  private button = document.createElement('button');
+  private watchId: number | null = null;
+  private dot: maplibregl.Marker | null = null;
+  private map: maplibregl.Map | null = null;
+
+  constructor(private onFix: (p: Point) => void, private onError: () => void) {
+    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+    this.button.type = 'button';
+    this.button.className = 'maplibregl-ctrl-geolocate';
+    this.button.setAttribute('aria-label', 'Meinen Standort zeigen');
+    this.button.title = 'Meinen Standort zeigen';
+    this.button.innerHTML = '<span class="maplibregl-ctrl-icon" aria-hidden="true"></span>';
+    this.button.addEventListener('click', () => this.onClick?.());
+    this.container.appendChild(this.button);
+  }
+
+  /** Wird beim Tippen auf den Knopf aufgerufen (von CourseMap gesetzt). */
+  onClick: (() => void) | null = null;
+
+  start(): void {
+    if (!('geolocation' in navigator)) return this.onError();
+    if (this.watchId != null) return;
+    this.button.classList.add('maplibregl-ctrl-geolocate-waiting');
+    this.watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        this.button.classList.remove('maplibregl-ctrl-geolocate-waiting');
+        this.button.classList.add('maplibregl-ctrl-geolocate-active');
+        if (!this.dot && this.map) {
+          const el = document.createElement('div');
+          el.className = 'maplibregl-user-location-dot';
+          el.dataset.testid = 'user-dot';
+          this.dot = new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(this.map);
+        } else {
+          this.dot?.setLngLat([p.lng, p.lat]);
+        }
+        this.onFix(p);
+      },
+      () => {
+        this.stop();
+        this.onError();
+      },
+      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 },
+    );
+  }
+
+  private stop(): void {
+    if (this.watchId != null) navigator.geolocation.clearWatch(this.watchId);
+    this.watchId = null;
+    this.button.classList.remove('maplibregl-ctrl-geolocate-waiting', 'maplibregl-ctrl-geolocate-active');
+  }
+
+  onAdd(map: maplibregl.Map): HTMLElement {
+    this.map = map;
+    return this.container;
+  }
+
+  onRemove(): void {
+    this.stop();
+    this.dot?.remove();
+    this.container.remove();
+  }
+}
+
+export type Padding = { top: number; bottom: number; left: number; right: number };
+
 export interface CourseMapOptions {
   onPosition: (p: Point | null) => void;
   onToggleMapOnly: () => void;
+  /** Frei sichtbarer Kartenbereich (Startnummer oben, Panel unten abziehen). */
+  getPadding: () => Padding;
 }
 
 export class CourseMap {
   private map: maplibregl.Map;
-  private geolocate: maplibregl.GeolocateControl;
+  private locator: LocateControl;
+  private getPadding: () => Padding;
+  /** Nach dem nächsten Standort-Fix den Ausschnitt anpassen (nur nach Tippen auf „Standort“). */
+  private fitOnFix = false;
+  /** Liefert die Punkte, die beim Standort-Fix zusätzlich ins Bild sollen (Athleten). */
+  focusPoints: (me: Point) => Point[] = () => [];
   private event: RaceEvent | null = null;
   private pins: maplibregl.Marker[] = [];
   private athletePins = new Map<string, maplibregl.Marker>();
   private usingFallback = false;
   private mapOnlyToggle: MapOnlyToggle;
 
-  constructor(container: HTMLElement, { onPosition, onToggleMapOnly }: CourseMapOptions) {
+  constructor(container: HTMLElement, { onPosition, onToggleMapOnly, getPadding }: CourseMapOptions) {
+    this.getPadding = getPadding;
     this.map = new maplibregl.Map({
       container,
       style: STYLE_URL,
@@ -133,23 +214,33 @@ export class CourseMap {
     });
     this.map.on('style.load', () => this.addCourseLayers());
 
-    this.geolocate = new maplibregl.GeolocateControl({
-      positionOptions: { enableHighAccuracy: true },
-      trackUserLocation: true,
-      showAccuracyCircle: true,
-    });
-    this.map.addControl(this.geolocate, 'top-right');
+    this.locator = new LocateControl(
+      (p) => {
+        onPosition(p);
+        if (this.fitOnFix) {
+          this.fitOnFix = false;
+          this.fitPoints([p, ...this.focusPoints(p)]);
+        }
+      },
+      () => onPosition(null),
+    );
+    this.locator.onClick = () => this.locate();
+    this.map.addControl(this.locator, 'top-right');
     this.mapOnlyToggle = new MapOnlyToggle(onToggleMapOnly);
     this.map.addControl(this.mapOnlyToggle, 'top-right');
-    this.map.addControl(new maplibregl.AttributionControl({
+    const attribution = new maplibregl.AttributionControl({
         compact: true,
         // Immer sichtbar, auch wenn nur der Ersatzstil geladen ist
         customAttribution: '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>',
-      }), 'top-right');
-    this.geolocate.on('geolocate', (pos: GeolocationPosition) =>
-      onPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-    );
-    this.geolocate.on('error', () => onPosition(null));
+      });
+    this.map.addControl(attribution, 'top-right');
+    // MapLibre zeigt den Quellenhinweis anfangs ausgeklappt (breiter Textbalken über der Karte)
+    // und klappt ihn erst beim ersten Verschieben ein → direkt eingeklappt starten, (i) klappt auf.
+    const collapse = () =>
+      container.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show');
+    collapse();
+    this.map.once('load', collapse);
+    this.map.once('idle', collapse);
   }
 
   setMapOnly(on: boolean): void {
@@ -158,7 +249,27 @@ export class CourseMap {
 
   /** Standort anfordern (zeigt beim ersten Mal die Berechtigungsabfrage). */
   locate(): void {
-    this.geolocate.trigger();
+    this.fitOnFix = true;
+    this.locator.start();
+  }
+
+  /** Ausschnitt so wählen, dass alle Punkte im frei sichtbaren Bereich liegen. */
+  fitPoints(points: Point[]): void {
+    const b = bounds(points);
+    if (!b) return;
+    this.map.fitBounds(b, { padding: this.safePadding(), maxZoom: 15, duration: 600 });
+  }
+
+  /** Padding begrenzen, damit fitBounds auf kleinen Bildschirmen nicht scheitert. */
+  private safePadding(): Padding {
+    const p = this.getPadding();
+    const c = this.map.getContainer();
+    const maxV = Math.max(0, c.clientHeight - 80);
+    const maxH = Math.max(0, c.clientWidth - 80);
+    const scale = (a: number, b: number, max: number) => (a + b > max ? max / (a + b) : 1);
+    const sv = scale(p.top, p.bottom, maxV);
+    const sh = scale(p.left, p.right, maxH);
+    return { top: p.top * sv, bottom: p.bottom * sv, left: p.left * sh, right: p.right * sh };
   }
 
   setEvent(ev: RaceEvent | null, fit = true): void {
@@ -173,7 +284,7 @@ export class CourseMap {
     const all = this.event?.legs.flatMap((l) => l.points) ?? [];
     const b = bounds(all);
     if (!b) return;
-    this.map.fitBounds(b, { padding: { top: 100, bottom: 260, left: 40, right: 60 }, maxZoom: 15, duration: 0 });
+    this.map.fitBounds(b, { padding: this.safePadding(), maxZoom: 15, duration: 0 });
   }
 
   /** Kurzbericht zum Kartenzustand (für Tests und Fehlersuche). */
@@ -246,6 +357,15 @@ export class CourseMap {
     const first = legs[0].points[0];
     const lastLeg = legs[legs.length - 1];
     const last = lastLeg.points[lastLeg.points.length - 1];
+    // Rundkurs: Start und Ziel liegen (fast) aufeinander → ein gemeinsamer Marker statt zwei verdeckter
+    if (haversine(first, last) < 150) {
+      this.pins.push(
+        new maplibregl.Marker({ element: pinElement('Start/Ziel', 'pin-start pin-finish') })
+          .setLngLat([first.lng, first.lat])
+          .addTo(this.map),
+      );
+      return;
+    }
     this.pins.push(
       new maplibregl.Marker({ element: pinElement('Start', 'pin-start') }).setLngLat([first.lng, first.lat]).addTo(this.map),
       new maplibregl.Marker({ element: pinElement('Ziel', 'pin-finish') }).setLngLat([last.lng, last.lat]).addTo(this.map),

@@ -24,6 +24,8 @@ async function addAthlete(page: Page, name: string, start: string, fields: Recor
   for (const [label, value] of Object.entries(fields)) await dialog.getByLabel(label).fill(value);
   await dialog.getByRole('button', { name: 'Speichern' }).click();
   await expect(dialog).toBeHidden();
+  // Die Meldung erscheint erst, wenn auch gespeichert ist – sonst kann ein Reload den Athleten verlieren
+  await expect(page.locator('#toast')).toHaveText(`${name} hinzugefügt.`);
 }
 
 test('Radrennen: Athlet anlegen, Position laut Plan und Durchgangszeit bei mir', async ({ browser }) => {
@@ -167,4 +169,35 @@ test('Teilen-Link nimmt Athleten, Pace und Renntag mit', async ({ page, browser 
   await expect(other.locator('#race-date')).toHaveValue('2026-08-23');
   await expect(other.getByTestId('athlete-status')).toHaveText(['Laut Plan bei km 5,0', 'Laut Plan bei km 6,0']);
   await other.close();
+});
+
+test('„Standort anzeigen“ zeigt mich und die Athleten im freien Kartenbereich', async ({ browser }) => {
+  const context = await browser.newContext({ geolocation: NORTH, permissions: ['geolocation'] });
+  const page = await context.newPage();
+  await setClock(page, '10:10');
+  await openApp(page);
+  await page.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await addAthlete(page, 'Jan', '10:00'); // km 5,0
+  await addAthlete(page, 'Max', '09:55', { 'Rad-Tempo in km/h': '34' }); // km 8,5
+
+  await page.getByRole('button', { name: 'Standort anzeigen' }).click();
+  await expect(page.getByTestId('user-dot')).toHaveCount(1);
+  await page.waitForTimeout(1200); // Kamerafahrt abwarten
+
+  // Frei sichtbarer Bereich: unter der Startnummer, über dem Panel
+  const bib = (await page.locator('#bib').boundingBox())!;
+  const sheet = (await page.locator('#sheet').boundingBox())!;
+  const vp = page.viewportSize()!;
+  const top = bib.y + bib.height;
+  const bottom = sheet.width > vp.width * 0.9 ? sheet.y : vp.height;
+  const left = sheet.width > vp.width * 0.9 ? 0 : sheet.x + sheet.width;
+  const inside = async (name: string, loc: ReturnType<typeof page.locator>) => {
+    const b = (await loc.boundingBox())!;
+    const cx = b.x + Math.min(b.width, 28) / 2; // Mittelpunkt des Punkts (bei Athleten links)
+    const cy = b.y + b.height / 2;
+    expect(cy > top && cy < bottom && cx > left && cx < vp.width, `${name} nicht im freien Kartenbereich`).toBe(true);
+  };
+  await inside('Eigener Standort', page.getByTestId('user-dot'));
+  for (const pin of await page.getByTestId('athlete-pin').all()) await inside('Athlet', pin);
+  await context.close();
 });

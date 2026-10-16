@@ -15,7 +15,11 @@ export default defineConfig({
     timezoneId: 'Europe/Berlin',
     locale: 'de-DE',
     // WebGL für MapLibre im Headless-Browser (Software-Rendering)
-    launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] },
+    launchOptions: {
+      args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
+      // Lokal (z. B. in Claudes Sandbox) einen vorhandenen Chromium nutzen statt herunterzuladen
+      executablePath: process.env.PW_CHROMIUM_PATH || undefined,
+    },
   },
   projects: [
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
