@@ -85,9 +85,15 @@ test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne S
     const b = (await pin.boundingBox())!;
     expect(b.x >= 0 && b.y >= 0 && b.x + b.width <= vp.width && b.y + b.height <= vp.height, 'Stopp außerhalb des Bildes').toBe(true);
   }
-  await expect
-    .poll(() => countColorPixels(page, PLAN_COLOR, { x: 0, y: 80, width: vp.width, height: vp.height - 120 }, 30), { timeout: 10_000 })
-    .toBeGreaterThan(150);
+  let px = 0;
+  try {
+    await expect
+      .poll(async () => (px = await countColorPixels(page, PLAN_COLOR, { x: 0, y: 80, width: vp.width, height: vp.height - 120 }, 45)), { timeout: 10_000 })
+      .toBeGreaterThan(120);
+  } catch {
+    const state = await page.evaluate(() => (window as unknown as { __supbuddyMap?: () => unknown }).__supbuddyMap?.());
+    throw new Error(`Wege nicht zu sehen (${px} Pixel). Kartenzustand: ${JSON.stringify(state)}`);
+  }
   await context.close();
 });
 

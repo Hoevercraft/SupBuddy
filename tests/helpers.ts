@@ -28,6 +28,17 @@ export function collectErrors(page: Page): string[] {
  * (toBeVisible() allein reicht nicht – das hat die 0-px-Karte durchgelassen.)
  */
 export async function expectOnScreen(locator: Locator, minSize = 8): Promise<void> {
+  // Mehrfach versuchen: wird das Element zwischendurch neu aufgebaut, zählt der nächste Stand
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await checkOnScreen(locator, minSize);
+    } catch (e) {
+      if (attempt >= 3 || !/not attached|detached/i.test(String(e))) throw e;
+    }
+  }
+}
+
+async function checkOnScreen(locator: Locator, minSize: number): Promise<void> {
   await expect(locator).toBeVisible();
   // Erreichbar heißt: notfalls im Panel hinscrollen, wie ein Mensch es tun würde
   await locator.scrollIntoViewIfNeeded();

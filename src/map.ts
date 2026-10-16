@@ -302,6 +302,9 @@ export class CourseMap {
       hasCourseSource: !!src,
       hasCourseLayer: !!this.map.getLayer('course-line'),
       legs: this.event?.legs.length ?? 0,
+      planRoutes: this.planGeoJSON.features.length,
+      hasPlanLayer: !!this.map.getLayer('plan-routes'),
+      stopPins: this.stopPins.length,
       zoom: Math.round(this.map.getZoom() * 10) / 10,
       canvas: `${canvas.width}x${canvas.height}`,
       loaded: this.map.loaded(),
@@ -335,14 +338,14 @@ export class CourseMap {
       type: 'line',
       source: 'plan-routes',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#FFFFFF', 'line-width': 7 },
+      paint: { 'line-color': '#FFFFFF', 'line-width': 9 },
     });
     this.map.addLayer({
       id: 'plan-routes',
       type: 'line',
       source: 'plan-routes',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': PLAN_COLOR, 'line-width': 4, 'line-dasharray': [1.5, 1.2] },
+      paint: { 'line-color': PLAN_COLOR, 'line-width': 5, 'line-dasharray': [1.6, 1] },
     });
   }
 

@@ -11,7 +11,7 @@ import { isoDate } from './format';
 import { buildPlan, type Plan, type PlanSettings } from './plan';
 import { loadSettings, planSection, saveSettings } from './plan-ui';
 import { fetchRoute } from './routing';
-import { formatDistance, formatKm } from './geo';
+import { formatDistance, formatKm, haversine } from './geo';
 import { GpxError, parseGpx } from './gpx';
 import { DISCIPLINES, eventKind, type Discipline, type Point, type RaceEvent } from './model';
 import { decodeEvent, normalizeLeg, shareUrl, tokenFromHash } from './share';
@@ -222,12 +222,20 @@ function render(fit = false): void {
 }
 
 /** Plan-Positionen laufen mit der Uhr: regelmäßig auffrischen, ohne laufende Eingaben zu stören. */
+/** Letzte Berührung/Scrollen im Panel – solange jemand dort arbeitet, nicht neu aufbauen. */
+let lastSheetInteraction = 0;
+const SHEET_QUIET_MS = 8000;
+
+function sheetBusy(): boolean {
+  const sheet = $('#sheet');
+  const focused = sheet.contains(document.activeElement) && document.activeElement !== document.body;
+  return focused || Date.now() - lastSheetInteraction < SHEET_QUIET_MS || $<HTMLDialogElement>('#athlete-dialog').open;
+}
+
 function tick(): void {
   if (!event || event.athletes.length === 0) return;
   renderAthleteMarkers();
-  const sheet = $('#sheet');
-  const busy = sheet.contains(document.activeElement) && document.activeElement !== document.body;
-  if (!busy && !$<HTMLDialogElement>('#athlete-dialog').open) renderSheet();
+  if (!sheetBusy()) renderSheet();
 }
 
 function currentPlanSettings(): PlanSettings {
@@ -316,6 +324,10 @@ function bindEvents(): void {
     if (fileInput.files?.length) await importFiles(fileInput.files);
     fileInput.value = '';
   });
+
+  for (const type of ['pointerdown', 'scroll', 'keydown']) {
+    $('#sheet').addEventListener(type, () => (lastSheetInteraction = Date.now()), { passive: true, capture: true });
+  }
 
   $('#sheet').addEventListener('click', async (e) => {
     const t = e.target as HTMLElement;
@@ -466,8 +478,12 @@ async function start(): Promise<void> {
     const { CourseMap } = await import('./map');
     courseMap = new CourseMap($('#map'), {
       onPosition: (p) => {
+        // Beim Gehen kommen sekündlich neue Positionen: nur bei echter Bewegung neu aufbauen
+        // Der erste Standort (oder sein Verlust) wird immer sofort angezeigt.
+        const first = !position || !p;
+        const moved = first || haversine(position!, p!) > 15;
         position = p;
-        renderSheet();
+        if (first || (moved && !sheetBusy())) renderSheet();
       },
       onToggleMapOnly: () => setMapOnly(!mapOnly),
       getPadding: visiblePadding,
