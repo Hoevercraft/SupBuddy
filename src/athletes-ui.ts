@@ -69,6 +69,27 @@ function hereText(ev: RaceEvent, athlete: Athlete, position: Point, now: number,
     : `${where}: schon vorbei, ${nb(`ca. ${clock(t)}`)}`;
 }
 
+/** Kurzstatus für die Leiste unten: „km 12,3 · bei dir in 20 min“. */
+export function shortStatus(ev: RaceEvent, athlete: Athlete, plan: PlanState, position: Point | null, now: number): string {
+  const nb = (x: string) => x.replace(/ /g, '\u00a0');
+  let here = '';
+  if (position && plan.state !== 'im-ziel') {
+    const n = nearestOnCourse(ev, position);
+    if (n) {
+      const t = timeAtAlong(timeline(ev, athlete, new Date(now)), n.along);
+      here = t >= now - 60_000 ? `bei dir ${nb(relative(t, now))}` : 'an dir vorbei';
+    }
+  }
+  switch (plan.state) {
+    case 'vor-start':
+      return [`Start ${nb(relative(plan.start, now))}`, here].filter(Boolean).join(' · ');
+    case 'im-ziel':
+      return 'im Ziel';
+    case 'unterwegs':
+      return [plan.inTransition ? 'im Wechsel' : `km ${km(plan.along)}`, here].filter(Boolean).join(' · ');
+  }
+}
+
 export interface AthleteNow {
   athlete: Athlete;
   plan: PlanState;

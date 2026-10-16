@@ -4,7 +4,7 @@ import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/800.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
-import { athleteDialogHtml, athletesNow, athletesSection, initials, openAthleteDialog, readAthleteForm } from './athletes-ui';
+import { athleteDialogHtml, athletesNow, athletesSection, initials, openAthleteDialog, readAthleteForm, shortStatus } from './athletes-ui';
 import { courseStats, legDistance, nearestOnCourse, type CourseNearest } from './course';
 import { DETOUR, MODES, type Mode } from './cheer';
 import { isoDate } from './format';
@@ -29,6 +29,10 @@ export const BUILD_LABEL = `v${__APP_VERSION__} · ${__APP_COMMIT__} · ${__APP_
 let event: RaceEvent | null = null;
 let position: Point | null = null;
 let mapOnly = false;
+/** Geöffneter Bereich (Icons rechts); null = nur Karte + Leiste unten */
+export type Section = 'athleten' | 'plan' | 'strecke';
+let section: Section | null = null;
+const SECTION_TITLES: Record<Section, string> = { athleten: 'Athleten', plan: 'Anfeuer-Plan', strecke: 'Strecke' };
 let plan: Plan | null = null;
 let planBusy = false;
 let planSettings: PlanSettings | null = null;
@@ -37,7 +41,7 @@ let courseMap: import('./map').CourseMap | null = null;
 let pick: { n: CourseNearest; route: Route | null; journey?: Journey; arrive: number | null; busy: boolean; locating: boolean; anchor: 'top' | 'bottom' } | null = null;
 const pickEl = document.createElement('div');
 /** Panel wurde für die Punkt-Karte eingeklappt (kleiner Bildschirm) → beim Schließen wieder zeigen */
-let pickHidSheet = false;
+let pickHidSection: Section | null = null;
 
 // ---------------------------------------------------------------- Hilfen
 
@@ -82,6 +86,7 @@ function shell(root: HTMLElement): void {
       </div>
     </header>
 
+    <button class="statusbar" id="statusbar" type="button" data-testid="statusbar" hidden></button>
     <section class="sheet" id="sheet" aria-live="polite"></section>
 
     <input type="file" id="file-input" accept=".gpx,application/gpx+xml,application/xml,text/xml" multiple hidden />
@@ -139,8 +144,39 @@ function positionText(): string {
   return `<p class="where" data-testid="where">Du bist <strong>${formatDistance(n.distance)}</strong> von der Strecke entfernt, auf Höhe von km ${formatKm(n.along).replace(' km', '')}${legInfo}.</p>`;
 }
 
+/** Leiste unten: wo sind die Athleten, wann bei mir. Tippen öffnet „Athleten“. */
+function renderStatus(): void {
+  const bar = $('#statusbar');
+  bar.hidden = !event || section !== null;
+  if (!event) return;
+  const now = Date.now();
+  const items = athletesNow(event, now);
+  bar.setAttribute('aria-label', 'Athleten öffnen');
+  bar.innerHTML = items.length
+    ? `<ul class="status-list">${items
+        .slice(0, 3)
+        .map(
+          ({ athlete, plan: p }) =>
+            `<li style="--athlete-color:${athlete.color}"><span class="status-dot" aria-hidden="true">${esc(initials(athlete.name))}</span><span class="status-name">${esc(athlete.name)}</span> <span class="status-text">${esc(shortStatus(event!, athlete, p, position, now))}</span></li>`,
+        )
+        .join('')}${items.length > 3 ? `<li class="status-more">+${items.length - 3} weitere</li>` : ''}</ul>`
+    : '<span class="status-empty">Noch keine Athleten – hier tippen zum Eintragen</span>';
+}
+
+/** Bereich öffnen/schließen (null = alle zu). */
+function setSection(s: Section | null): void {
+  section = event ? s : null;
+  if (section && mapOnly) setMapOnly(false);
+  document.body.dataset.section = section ?? '';
+  courseMap?.setSection(section);
+  renderSheet();
+  renderStatus();
+  $('#sheet').scrollTop = 0;
+}
+
 function renderSheet(): void {
   const sheet = $('#sheet');
+  sheet.hidden = !!event && !section;
   if (!event) {
     sheet.innerHTML = `
       <h2 class="sheet-title">Welches Rennen schaust du?</h2>
@@ -169,18 +205,29 @@ function renderSheet(): void {
     )
     .join('');
 
+  if (!section) {
+    sheet.innerHTML = '';
+    return;
+  }
+  const body =
+    section === 'athleten'
+      ? `${positionText()}${athletesSection(event, position, Date.now())}`
+      : section === 'plan'
+        ? `${planSection(event, { settings: currentPlanSettings(), plan, busy: planBusy, fromPosition: !!position, now: Date.now() })}
+           <p class="hint pick-tip" data-testid="pick-tip">Tipp: Tippe auf die Strecke – du siehst, wann deine Athleten dort sind, und den Weg dorthin.</p>`
+        : `<ul class="legs">${legs}</ul>
+           <div class="actions">
+             <button class="btn btn-primary" id="btn-share" type="button">Link teilen</button>
+             <button class="btn" id="btn-load" type="button">Etappe hinzufügen</button>
+           </div>
+           <button class="btn btn-quiet" id="btn-reset" type="button">Anderes Rennen laden</button>`;
   sheet.innerHTML = `
-    ${positionText()}
-    ${athletesSection(event, position, Date.now())}
-    ${planSection(event, { settings: currentPlanSettings(), plan, busy: planBusy, fromPosition: !!position, now: Date.now() })}
-    <p class="hint pick-tip" data-testid="pick-tip">Tipp: Tippe auf die Strecke – du siehst, wann deine Athleten dort sind, und den Weg dorthin.</p>
-    <h3 class="sheet-sub">Strecke</h3>
-    <ul class="legs">${legs}</ul>
-    <div class="actions">
-      <button class="btn btn-primary" id="btn-share" type="button">Link teilen</button>
-      <button class="btn" id="btn-load" type="button">Etappe hinzufügen</button>
+    <div class="section-head">
+      <span class="sheet-grip" aria-hidden="true"></span>
+      <h2 class="section-title" data-testid="section-title">${SECTION_TITLES[section]}</h2>
+      <button class="section-close" type="button" data-close-section aria-label="${SECTION_TITLES[section]} schließen">×</button>
     </div>
-    <button class="btn btn-quiet" id="btn-reset" type="button">Anderes Rennen laden</button>
+    <div class="section-body section-${section}">${body}</div>
   `;
 }
 
@@ -190,7 +237,10 @@ function visiblePadding() {
   const bib = document.querySelector('#bib');
   const sheet = document.querySelector('#sheet');
   const bibBox = bib && !mapOnly && !(bib as HTMLElement).hidden ? bib.getBoundingClientRect() : null;
-  const sheetBox = sheet && !mapOnly ? sheet.getBoundingClientRect() : null;
+  // Offenes Panel – sonst die schmale Leiste unten
+  const bar = document.querySelector<HTMLElement>('#statusbar');
+  const lower = sheet && !(sheet as HTMLElement).hidden ? sheet : bar && !bar.hidden ? bar : null;
+  const sheetBox = lower && !mapOnly ? lower.getBoundingClientRect() : null;
   // Panel unten über die volle Breite → unten abziehen; auf breiten Bildschirmen liegt es links
   const sheetBottom = sheetBox && sheetBox.width > window.innerWidth * 0.9;
   return {
@@ -224,8 +274,11 @@ function renderAthleteMarkers(): void {
 function render(fit = false): void {
   document.body.classList.toggle('has-event', !!event);
   if (!event && mapOnly) setMapOnly(false);
+  document.body.dataset.section = section ?? '';
+  courseMap?.setSection(section);
   renderBib();
   renderSheet();
+  renderStatus();
   courseMap?.setEvent(event, fit);
   renderAthleteMarkers();
 }
@@ -244,6 +297,7 @@ function sheetBusy(): boolean {
 function tick(): void {
   if (!event || event.athletes.length === 0) return;
   renderAthleteMarkers();
+  renderStatus();
   if (!sheetBusy()) renderSheet();
 }
 
@@ -308,11 +362,11 @@ function renderPick(): void {
 
 function openPick(n: CourseNearest): void {
   pick = { n, route: null, arrive: null, busy: false, locating: false, anchor: 'bottom' };
-  // Wenig Platz über dem Panel (Handy): Panel einklappen, damit Karte, Hinweis und Weg Platz haben
+  // Wenig Platz über dem Panel (Handy): Bereich schließen, damit Karte, Hinweis und Weg Platz haben
   const pad = visiblePadding();
-  if (!mapOnly && window.innerHeight - pad.top - pad.bottom < 480) {
-    setMapOnly(true);
-    pickHidSheet = true;
+  if (section && window.innerHeight - pad.top - pad.bottom < 480) {
+    pickHidSection = section;
+    setSection(null);
   }
   courseMap?.setPickRoute(null);
   renderPick();
@@ -403,6 +457,7 @@ async function setEvent(ev: RaceEvent | null, fit = true): Promise<void> {
   if (plan) clearPlan();
   courseMap?.closePick();
   event = ev && ev.legs.length > 0 ? ev : null;
+  if (!event) section = null;
   render(fit);
   await saveEvent(event);
   document.body.dataset.saved = event?.name ?? '';
@@ -425,6 +480,10 @@ async function importFiles(files: FileList): Promise<void> {
     }
   }
   if (added > 0 && next) {
+    // Nächster Schritt nach dem Laden: Athleten eintragen. Vor setEvent öffnen,
+    // damit die Strecke in den Bereich über dem Panel eingepasst wird.
+    const openAthletes = next.athletes.length === 0 && !section;
+    if (openAthletes) section = 'athleten';
     await setEvent(next);
     toast(added === 1 ? 'Strecke geladen.' : `${added} Etappen geladen.`);
   }
@@ -442,6 +501,17 @@ async function openShare(): Promise<void> {
 }
 
 function bindEvents(): void {
+  $('#statusbar').addEventListener('click', () => setSection('athleten'));
+  // Panel nach unten wischen schließt den Bereich (am Kopf anfassen)
+  let dragStart: number | null = null;
+  $('#sheet').addEventListener('touchstart', (e) => {
+    const t = e.target as HTMLElement;
+    dragStart = t.closest('.section-head') ? e.touches[0].clientY : null;
+  }, { passive: true });
+  $('#sheet').addEventListener('touchend', (e) => {
+    if (dragStart !== null && e.changedTouches[0].clientY - dragStart > 60) setSection(null);
+    dragStart = null;
+  });
   const fileInput = $<HTMLInputElement>('#file-input');
   fileInput.addEventListener('change', async () => {
     if (fileInput.files?.length) await importFiles(fileInput.files);
@@ -456,6 +526,7 @@ function bindEvents(): void {
     const t = e.target as HTMLElement;
     if (t.closest('#btn-load')) fileInput.click();
     else if (t.closest('#btn-share')) await openShare();
+    else if (t.closest('[data-close-section]')) setSection(null);
     else if (t.closest('#btn-locate')) courseMap?.locate();
     else if (t.closest('[data-mode]')) {
       const m = (t.closest('[data-mode]') as HTMLElement).dataset.mode as Mode;
@@ -615,6 +686,7 @@ async function start(): Promise<void> {
         const moved = first || haversine(position!, p!) > 15;
         position = p;
         if (first || (moved && !sheetBusy())) renderSheet();
+        if (first || moved) renderStatus();
         // Weg zum angetippten Punkt wartete auf den Standort
         if (pick?.locating) {
           pick.locating = false;
@@ -626,15 +698,15 @@ async function start(): Promise<void> {
         }
       },
       onToggleMapOnly: () => {
-        pickHidSheet = false; // selbst umgeschaltet → so lassen
         setMapOnly(!mapOnly);
       },
       getPadding: visiblePadding,
       onCoursePick: openPick,
+      onSection: (s: Section) => setSection(section === s ? null : s),
       onPickClose: () => {
         pick = null;
-        if (pickHidSheet && mapOnly) setMapOnly(false);
-        pickHidSheet = false;
+        if (pickHidSection && !section) setSection(pickHidSection);
+        pickHidSection = null;
       },
     });
     bindPick();

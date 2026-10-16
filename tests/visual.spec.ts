@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { countColorPixels, expectOnScreen, fixture, openApp } from './helpers';
+import { countColorPixels, expectOnScreen, fixture, openApp, openSection } from './helpers';
 
 /*
  * Sichtprüfungen: Was sieht der Mensch auf dem Bildschirm?
@@ -58,24 +58,30 @@ test('Bedienelemente sind sichtbar und nicht verdeckt', async ({ page }) => {
   await expectOnScreen(page.getByRole('button', { name: 'GPX-Datei laden' }));
 
   await page.locator('#file-input').setInputFiles(fixture('triathlon.gpx'));
-  await expect(page.getByTestId('leg')).toHaveCount(3);
-
+  // Nach dem Laden ist „Athleten“ offen (nächster Schritt)
+  await expect(page.getByTestId('section-title')).toHaveText('Athleten');
+  await expectOnScreen(page.getByRole('button', { name: 'Standort anzeigen' }), 40);
+  await expectOnScreen(page.getByRole('button', { name: 'Athlet hinzufügen' }), 40);
+  for (const label of ['Athleten', 'Anfeuer-Plan', 'Strecke']) await expectOnScreen(page.locator(`.ctrl-section-btn[aria-label="${label}"]`), 24);
   await expectOnScreen(page.locator('#event-name'));
   await expectOnScreen(page.getByTestId('total-distance'));
   await expectOnScreen(page.locator('.maplibregl-ctrl-geolocate'), 24);
   // Quellenhinweis der Karte (OpenStreetMap) muss sichtbar sein
   await expectOnScreen(page.locator('.maplibregl-ctrl-attrib'), 16);
+  // Strecke wird über dem offenen Bereich eingepasst: Start und Ziel frei sichtbar
   await expectOnScreen(page.locator('.pin-start'));
   await expectOnScreen(page.locator('.pin-finish'));
+  await openSection(page, 'Strecke');
+  await expect(page.getByTestId('leg')).toHaveCount(3);
   await expectOnScreen(page.getByRole('button', { name: 'Link teilen' }), 40);
   await expectOnScreen(page.getByRole('button', { name: 'Etappe hinzufügen' }), 40);
-  await expectOnScreen(page.getByRole('button', { name: 'Standort anzeigen' }), 40);
   for (const sel of await page.locator('.leg-discipline').all()) await expectOnScreen(sel);
 });
 
 test('Screenshot für die Durchsicht', async ({ page }, info) => {
   await openApp(page);
   await page.locator('#file-input').setInputFiles(fixture('triathlon.gpx'));
+  await openSection(page, 'Strecke');
   await expect(page.getByTestId('leg')).toHaveCount(3);
   await page.waitForTimeout(800);
   await info.attach('triathlon', { body: await page.screenshot(), contentType: 'image/png' });
@@ -119,6 +125,7 @@ test('Vollbild: ein Knopf blendet Startnummer und Panel aus und wieder ein', asy
 
   await exit.click();
   await expect(page.locator('#bib')).toBeVisible();
+  await openSection(page, 'Strecke');
   await expectOnScreen(page.getByRole('button', { name: 'Link teilen' }), 40);
   await expect(page.getByRole('button', { name: 'Vollbild', exact: true })).toHaveAttribute('aria-pressed', 'false');
 });

@@ -93,7 +93,7 @@ export function planSection(ev: RaceEvent, view: PlanView): string {
         }
         <label>Stopps <select id="plan-stops" aria-label="Wunschanzahl Stopps">${stopOptions}</select></label>
       </div>
-      <p class="hint cheer-from">${view.fromPosition ? 'Startpunkt: dein Standort.' : 'Startpunkt: Start der Strecke. Mit „Standort anzeigen“ planst du ab deinem Standort.'}</p>
+      <p class="hint cheer-from">${view.fromPosition ? 'Startpunkt: dein Standort.' : 'Startpunkt: Start der Strecke. Mit dem Standort-Knopf oben rechts planst du ab deinem Standort.'}</p>
       <button class="btn btn-primary btn-wide" id="btn-plan" type="button"${view.busy ? ' disabled' : ''}>${view.busy ? 'Plane Wege …' : 'Plan erstellen'}</button>
       ${view.plan ? planResult(ev, view.plan, view.now) : ''}
     </section>`;

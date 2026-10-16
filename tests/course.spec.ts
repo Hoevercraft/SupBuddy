@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { collectErrors, fixture, openApp } from './helpers';
+import { collectErrors, fixture, openApp, openSection } from './helpers';
 
 const km = (text: string | null) => parseFloat((text ?? '').replace(/[^\d,]/g, '').replace(',', '.'));
 
@@ -13,6 +13,7 @@ test('Radrennen laden: Startnummer zeigt Name, Art und Länge', async ({ page })
   const total = km(await page.getByTestId('total-distance').textContent());
   expect(total).toBeGreaterThan(37.2);
   expect(total).toBeLessThan(38.2);
+  await openSection(page, 'Strecke');
   await expect(page.getByTestId('leg')).toHaveCount(1);
   await expect(page.locator('.pin-start')).toBeVisible();
   // Rundkurs: ein gemeinsamer Start/Ziel-Marker statt zwei übereinanderliegender
@@ -27,6 +28,7 @@ test('Triathlon aus einer Datei: drei Etappen mit erkannter Disziplin', async ({
   await page.locator('#file-input').setInputFiles(fixture('triathlon.gpx'));
 
   await expect(page.locator('#event-kind')).toHaveText('Triathlon');
+  await openSection(page, 'Strecke');
   const legs = page.getByTestId('leg');
   await expect(legs).toHaveCount(3);
   await expect(legs.nth(0).locator('select')).toHaveValue('schwimmen');
@@ -40,6 +42,7 @@ test('Triathlon aus einer Datei: drei Etappen mit erkannter Disziplin', async ({
 test('Disziplin ändern und Etappe entfernen', async ({ page }) => {
   await openApp(page);
   await page.locator('#file-input').setInputFiles(fixture('triathlon.gpx'));
+  await openSection(page, 'Strecke');
   await page.getByTestId('leg').nth(2).locator('select').selectOption('wechsel');
   await expect(page.getByTestId('leg').nth(2).locator('select')).toHaveValue('wechsel');
 
@@ -64,6 +67,7 @@ test('Strecke bleibt nach dem Neuladen erhalten', async ({ page }) => {
   await page.reload();
   await page.locator('body[data-ready="true"]').waitFor();
   await expect(page.locator('#event-name')).toHaveValue('Mein Rennen');
+  await openSection(page, 'Strecke');
   await expect(page.getByTestId('leg')).toHaveCount(1);
 });
 
@@ -71,6 +75,7 @@ test('Teilen-Link öffnet dieselbe Strecke auf einem anderen Gerät', async ({ p
   await openApp(page);
   await page.locator('#file-input').setInputFiles(fixture('triathlon.gpx'));
   // Erst warten, bis die Strecke wirklich geladen ist (sonst Wettlauf, v. a. auf WebKit)
+  await openSection(page, 'Strecke');
   await expect(page.getByTestId('leg')).toHaveCount(3);
   const before = await page.getByTestId('total-distance').textContent();
   expect(before).toMatch(/km/);
@@ -86,6 +91,7 @@ test('Teilen-Link öffnet dieselbe Strecke auf einem anderen Gerät', async ({ p
   const url = new URL(link);
   await openApp(other, url.hash);
   await expect(other.locator('#event-name')).toHaveValue('Stadt-Triathlon');
+  await openSection(other, 'Strecke');
   await expect(other.getByTestId('leg')).toHaveCount(3);
   await expect(other.getByTestId('total-distance')).toHaveText(before!);
   // Hash wird nach dem Laden entfernt
