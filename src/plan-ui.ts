@@ -4,7 +4,7 @@ import { clock, duration, relative } from './format';
 import { formatDistance, formatKm } from './geo';
 import { DISCIPLINES, type RaceEvent } from './model';
 import type { Plan, PlanSettings } from './plan';
-import { appleMapsUrl, googleMapsUrl } from './routing';
+import { appleMapsUrl, googleMapsUrl, viaPoints } from './routing';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -138,7 +138,13 @@ function planResult(ev: RaceEvent, plan: Plan, now: number): string {
         })
         .join('');
       const leave = stop.arrive - stop.travel * 1000;
-      const nav = isApple() ? appleMapsUrl(c.point, plan.settings.mode) : googleMapsUrl(c.point, plan.settings.mode);
+      // Zwischenziele auf unserer Route: die Navi-App nimmt denselben Weg (ohne die Strecke zu queren)
+      const via = viaPoints(stop.route);
+      const google = googleMapsUrl(c.point, plan.settings.mode, via);
+      const navLinks = isApple()
+        ? `<a class="btn btn-small" data-testid="stop-nav" href="${appleMapsUrl(c.point, plan.settings.mode, via)}" target="_blank" rel="noopener">Apple Karten</a>
+           <a class="btn btn-small" data-testid="stop-nav-google" href="${google}" target="_blank" rel="noopener">Google Maps</a>`
+        : `<a class="btn btn-small" data-testid="stop-nav" href="${google}" target="_blank" rel="noopener">Navigation</a>`;
       return `
         <li class="stop" data-testid="stop">
           <span class="stop-num" aria-hidden="true">${i + 1}</span>
@@ -147,9 +153,10 @@ function planResult(ev: RaceEvent, plan: Plan, now: number): string {
             <div class="stop-way">${esc(way)}</div>
             <div class="stop-arrive" data-testid="stop-arrive">Los ${clock(leave)}${i === 0 ? ` (${esc(relative(leave, now))})` : ''} · an ca. ${clock(stop.arrive)}</div>
             <ul class="stop-athletes">${times}</ul>
+            ${via.length ? `<p class="stop-via">Navi führt über ${via.length} Zwischenziel${via.length > 1 ? 'e' : ''} auf diesem Weg.</p>` : ''}
             <div class="stop-actions">
               <button type="button" class="btn btn-small" data-show-stop="${i}">Weg zeigen</button>
-              <a class="btn btn-small" data-testid="stop-nav" href="${nav}" target="_blank" rel="noopener">Navigation</a>
+              ${navLinks}
             </div>
           </div>
         </li>`;

@@ -493,3 +493,5 @@ body:not(.has-event) .ctrl-maponly { display: none; }
   border-radius: 4px;
   vertical-align: middle;
 }
+
+.stop-via { font-size: 13px; color: var(--ink-soft); margin: 0 0 6px !important; }

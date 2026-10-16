@@ -67,13 +67,45 @@ export function estimatedRoute(from: Point, to: Point, detour: number): Route {
   return { points: [from, to], distance: haversine(from, to) * detour, routed: false };
 }
 
-/** Navigation in Google Maps (öffnet auf dem Handy die App, sonst die Webseite). */
-export function googleMapsUrl(to: Point, mode: Mode): string {
-  return `https://www.google.com/maps/dir/?api=1&destination=${to.lat.toFixed(6)},${to.lng.toFixed(6)}&travelmode=${MODES[mode].google}`;
+/** Höchstzahl Zwischenziele: Google Maps erlaubt im Handy-Browser nur 3. */
+export const MAX_VIA = 3;
+
+/**
+ * Zwischenziele auf unserer Route, damit die Navi-App denselben Weg nimmt (und die
+ * Rennstrecke nicht quert). Gleichmäßig verteilt, nicht zu nah an Start und Ziel.
+ * Kurze oder nur geschätzte Wege bekommen keine.
+ */
+export function viaPoints(route: Route, max = MAX_VIA): Point[] {
+  if (!route.routed || route.points.length < 3) return [];
+  const pts = route.points;
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + haversine(pts[i - 1], pts[i]));
+  const total = cum[cum.length - 1];
+  if (total < 600) return [];
+  const n = total < 1500 ? 1 : total < 3000 ? 2 : max;
+  const out: Point[] = [];
+  for (let k = 1; k <= n; k++) {
+    const target = (total * k) / (n + 1);
+    let i = cum.findIndex((c) => c >= target);
+    if (i <= 0) i = 1;
+    const seg = cum[i] - cum[i - 1];
+    const t = seg === 0 ? 0 : (target - cum[i - 1]) / seg;
+    out.push({ lat: pts[i - 1].lat + t * (pts[i].lat - pts[i - 1].lat), lng: pts[i - 1].lng + t * (pts[i].lng - pts[i - 1].lng) });
+  }
+  return out;
 }
 
-/** Navigation in Apple Karten. */
-export function appleMapsUrl(to: Point, mode: Mode): string {
-  const flag = mode === 'fuss' ? '&dirflg=w' : '';
-  return `https://maps.apple.com/?daddr=${to.lat.toFixed(6)},${to.lng.toFixed(6)}${flag}`;
+const ll = (p: Point) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
+
+/** Navigation in Google Maps (öffnet auf dem Handy die App, sonst die Webseite). Start = aktueller Standort. */
+export function googleMapsUrl(to: Point, mode: Mode, via: Point[] = []): string {
+  const w = via.length ? `&waypoints=${via.slice(0, MAX_VIA).map(ll).join('%7C')}` : '';
+  return `https://www.google.com/maps/dir/?api=1&destination=${ll(to)}&travelmode=${MODES[mode].google}${w}`;
+}
+
+/** Navigation in Apple Karten (einheitliche Maps-URLs, iOS 18.4+). Start = aktueller Standort. */
+export function appleMapsUrl(to: Point, mode: Mode, via: Point[] = []): string {
+  const m = mode === 'fuss' ? 'walking' : 'cycling';
+  const w = via.slice(0, MAX_VIA).map((p) => `&waypoint=${ll(p)}`).join('');
+  return `https://maps.apple.com/directions?destination=${ll(to)}${w}&mode=${m}`;
 }
