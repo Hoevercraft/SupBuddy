@@ -5,6 +5,8 @@ import { formatDistance, formatKm } from './geo';
 import { DISCIPLINES, type RaceEvent } from './model';
 import type { Plan, PlanSettings } from './plan';
 import { appleMapsUrl, googleMapsUrl, viaPoints } from './routing';
+import { euro, LAENDER_URL, suggestTicket, TICKET_PRICES_AS_OF } from './tickets';
+import { legLabel, rideLegs, type Journey } from './transit';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -31,7 +33,8 @@ export function loadSettings(ev: RaceEvent): PlanSettings {
   const speed = Number(saved.speed) >= 2 && Number(saved.speed) <= 40 ? Number(saved.speed) : MODES[mode].kmh;
   const maxStops = Number(saved.maxStops) >= 1 && Number(saved.maxStops) <= 5 ? Number(saved.maxStops) : 3;
   const athleteIndex = Number(saved.athleteIndex) >= 0 && Number(saved.athleteIndex) < ev.athletes.length ? Number(saved.athleteIndex) : 0;
-  return { mode, speed, maxStops, athleteIndex };
+  const people = Number.isInteger(Number(saved.people)) && Number(saved.people) >= 1 && Number(saved.people) <= 30 ? Number(saved.people) : 1;
+  return { mode, speed, maxStops, athleteIndex, people };
 }
 
 export function saveSettings(s: PlanSettings): void {
@@ -83,7 +86,11 @@ export function planSection(ev: RaceEvent, view: PlanView): string {
       <div class="seg" role="group" aria-label="Unterwegs">${modeButtons}</div>
       <div class="cheer-fields">
         <label>Für <select id="plan-athlete" aria-label="Plan für Athlet">${athleteOptions}</select></label>
-        <label>Tempo <input id="plan-speed" inputmode="decimal" aria-label="Dein Tempo in km/h" value="${String(s.speed).replace('.', ',')}" /> km/h</label>
+        ${
+          s.mode === 'oepnv'
+            ? `<label>Ihr seid <input id="plan-people" inputmode="numeric" aria-label="Anzahl Supporter" value="${s.people ?? 1}" /> ${(s.people ?? 1) === 1 ? 'Person' : 'Personen'}</label>`
+            : `<label>Tempo <input id="plan-speed" inputmode="decimal" aria-label="Dein Tempo in km/h" value="${String(s.speed).replace('.', ',')}" /> km/h</label>`
+        }
         <label>Stopps <select id="plan-stops" aria-label="Wunschanzahl Stopps">${stopOptions}</select></label>
       </div>
       <p class="hint cheer-from">${view.fromPosition ? 'Startpunkt: dein Standort.' : 'Startpunkt: Start der Strecke. Mit „Standort anzeigen“ planst du ab deinem Standort.'}</p>
@@ -123,7 +130,11 @@ function planResult(ev: RaceEvent, plan: Plan, now: number): string {
           : c.along <= 50
             ? 'Start'
             : `km ${km(c.along)}${ev.legs.length > 1 ? ` · ${DISCIPLINES[legOf(c.along).discipline].label}` : ''}`;
-      const way = `${formatDistance(stop.route.distance)} ${mode.verb} · ca. ${duration(stop.travel * 1000)}${stop.route.routed ? '' : ' (geschätzt)'}`;
+      const j = stop.journey;
+      const rides = j ? rideLegs(j) : [];
+      const way = j
+        ? `Bus & Bahn · ca. ${duration(stop.travel * 1000)}${rides.length > 1 ? ` · ${rides.length - 1}× umsteigen` : ''}`
+        : `${formatDistance(stop.route.distance)} ${plan.settings.mode === 'oepnv' ? (stop.route.routed ? 'zu Fuß' : 'mit Bus & Bahn') : mode.verb} · ca. ${duration(stop.travel * 1000)}${stop.route.routed ? '' : ' (geschätzt)'}`;
       const times = passTimes(ev, ev.athletes, c.along, today)
         .map((t, j) => {
           const a = ev.athletes[j];
@@ -139,7 +150,7 @@ function planResult(ev: RaceEvent, plan: Plan, now: number): string {
         .join('');
       const leave = stop.arrive - stop.travel * 1000;
       // Zwischenziele auf unserer Route: die Navi-App nimmt denselben Weg (ohne die Strecke zu queren)
-      const via = viaPoints(stop.route);
+      const via = plan.settings.mode === 'oepnv' ? [] : viaPoints(stop.route);
       const google = googleMapsUrl(c.point, plan.settings.mode, via);
       const navLinks = isApple()
         ? `<a class="btn btn-small" data-testid="stop-nav" href="${appleMapsUrl(c.point, plan.settings.mode, via)}" target="_blank" rel="noopener">Apple Karten</a>
@@ -153,6 +164,7 @@ function planResult(ev: RaceEvent, plan: Plan, now: number): string {
             <div class="stop-way">${esc(way)}</div>
             ${stop.route.crosses ? '<div class="stop-cross" data-testid="stop-cross">⚠ Weg quert die Strecke – ohne Queren gibt es hier keinen Weg. Nur queren, wenn gerade niemand kommt bzw. Ordner es erlauben.</div>' : ''}
             <div class="stop-arrive" data-testid="stop-arrive">Los ${clock(leave)}${i === 0 ? ` (${esc(relative(leave, now))})` : ''} · an ca. ${clock(stop.arrive)}</div>
+            ${j ? journeyHtml(j) : ''}
             <ul class="stop-athletes">${times}</ul>
             ${via.length ? `<p class="stop-via">Navi führt über ${via.length} Zwischenziel${via.length > 1 ? 'e' : ''} auf diesem Weg.</p>` : ''}
             <div class="stop-actions">
@@ -171,8 +183,59 @@ function planResult(ev: RaceEvent, plan: Plan, now: number): string {
       <p class="plan-summary" data-testid="plan-summary">${esc(athlete.name)} ${plan.stops.length}× anfeuern${
         plan.stops.length < plan.settings.maxStops ? ` (mehr Stopps sind ${mode.verb} nicht zu schaffen)` : ''
       }. ${startInfo}</p>
-      ${plan.estimated ? '<p class="hint" data-testid="plan-estimated">Wege nur geschätzt: Das Routing ist gerade nicht erreichbar.</p>' : ''}
+      ${
+        plan.estimated
+          ? `<p class="hint" data-testid="plan-estimated">${
+              plan.settings.mode === 'oepnv'
+                ? 'Fahrplan gerade nicht erreichbar: Zeiten nur geschätzt. Prüfe die Verbindung vor der Abfahrt in der Navi-App.'
+                : 'Wege nur geschätzt: Das Routing ist gerade nicht erreichbar.'
+            }</p>`
+          : ''
+      }
       <ol class="stops">${items}</ol>
+      ${plan.settings.mode === 'oepnv' ? ticketHtml(plan, new Date(plan.startTime)) : ''}
       <button class="btn btn-quiet" id="btn-plan-clear" type="button">Plan verwerfen</button>
     </div>`;
+}
+
+/** Fahrten einer Verbindung: „Bus 5009 · 10:16 Rotes Tor → 10:27 Sportplatz“. */
+function journeyHtml(j: Journey): string {
+  const rides = rideLegs(j)
+    .map(
+      (l) =>
+        `<li><strong>${esc(legLabel(l))}</strong> ${clock(l.from.time)} ${esc(l.from.name)} → ${clock(l.to.time)} ${esc(l.to.name)}</li>`,
+    )
+    .join('');
+  return rides ? `<ol class="stop-legs" data-testid="stop-legs">${rides}</ol>` : '';
+}
+
+/** Ticket-Tipp für die Gruppe unter dem Plan. */
+function ticketHtml(plan: Plan, day: Date): string {
+  const journeys = plan.stops.flatMap((s) => (s.journey ? [s.journey] : []));
+  const people = plan.settings.people ?? 1;
+  const tip = suggestTicket(journeys, people, day);
+  const who = people === 1 ? 'dich' : `${people} Personen`;
+  // Fahrplan war nicht erreichbar → kein Tipp statt eines falschen „kein Ticket nötig“
+  if (plan.estimated && !journeys.length) return '';
+  let body: string;
+  if (tip.none) body = 'Kein Ticket nötig – alle Wege gehen zu Fuß.';
+  else {
+    const parts: string[] = [];
+    if (tip.land) {
+      const n = tip.land.tickets > 1 ? `${tip.land.tickets}× ` : '';
+      parts.push(
+        `Für ${who}: <strong>${n}${esc(tip.land.name)}</strong> für zusammen ca. ${euro(tip.land.price)} (DB-Preis, Stand ${TICKET_PRICES_AS_OF}).${tip.land.note ? ` ${esc(tip.land.note)}` : ''} <a href="${LAENDER_URL}" target="_blank" rel="noopener">Länder-Tickets</a>`,
+      );
+    } else if (tip.uncovered?.length) {
+      parts.push(`Für diese Fahrten (${esc(tip.uncovered.join(', '))}) kenne ich kein passendes Länder-Ticket – Ticket bitte in der Navi- oder Verbund-App prüfen.`);
+    }
+    if (tip.verbund) {
+      parts.push(
+        `Fahrt ihr nur im ${esc(tip.verbund.name)}-Gebiet? Dann prüft auch die <a href="${tip.verbund.url}" target="_blank" rel="noopener">${esc(tip.verbund.ticket)}</a> – oft günstiger.`,
+      );
+    }
+    body = parts.join(' ');
+  }
+  return `<div class="ticket-tip" data-testid="ticket-tip"><strong class="ticket-title">Ticket-Tipp</strong> ${body}</div>
+    ${journeys.length ? '<p class="hint attribution">Fahrplandaten: <a href="https://transitous.org" target="_blank" rel="noopener">Transitous</a></p>' : ''}`;
 }

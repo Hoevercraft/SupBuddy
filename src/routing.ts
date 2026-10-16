@@ -120,13 +120,16 @@ const ll = (p: Point) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
 
 /** Navigation in Google Maps (öffnet auf dem Handy die App, sonst die Webseite). Start = aktueller Standort. */
 export function googleMapsUrl(to: Point, mode: Mode, via: Point[] = []): string {
+  // Bei Bus & Bahn kennt Google keine Zwischenziele
+  if (mode === 'oepnv') via = [];
   const w = via.length ? `&waypoints=${via.slice(0, MAX_VIA).map(ll).join('%7C')}` : '';
   return `https://www.google.com/maps/dir/?api=1&destination=${ll(to)}&travelmode=${MODES[mode].google}${w}`;
 }
 
 /** Navigation in Apple Karten (einheitliche Maps-URLs, iOS 18.4+). Start = aktueller Standort. */
 export function appleMapsUrl(to: Point, mode: Mode, via: Point[] = []): string {
-  const m = mode === 'fuss' ? 'walking' : 'cycling';
+  const m = mode === 'fuss' ? 'walking' : mode === 'oepnv' ? 'transit' : 'cycling';
+  if (mode === 'oepnv') via = [];
   const w = via.slice(0, MAX_VIA).map((p) => `&waypoint=${ll(p)}`).join('');
   return `https://maps.apple.com/directions?destination=${ll(to)}${w}&mode=${m}`;
 }

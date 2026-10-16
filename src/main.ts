@@ -11,6 +11,8 @@ import { isoDate } from './format';
 import { buildPlan, type Plan, type PlanSettings } from './plan';
 import { loadSettings, planSection, saveSettings } from './plan-ui';
 import { estimatedRoute, fetchRoute, type Route } from './routing';
+import { estimateTransitSeconds, fetchJourneys, type Journey } from './transit';
+import { journeyRoute } from './plan';
 import { pickHtml } from './pick-ui';
 import { formatDistance, formatKm, haversine } from './geo';
 import { GpxError, parseGpx } from './gpx';
@@ -32,7 +34,7 @@ let planBusy = false;
 let planSettings: PlanSettings | null = null;
 let courseMap: import('./map').CourseMap | null = null;
 /** Angetippter Streckenpunkt (Karte am Punkt) */
-let pick: { n: CourseNearest; route: Route | null; arrive: number | null; busy: boolean; locating: boolean; anchor: 'top' | 'bottom' } | null = null;
+let pick: { n: CourseNearest; route: Route | null; journey?: Journey; arrive: number | null; busy: boolean; locating: boolean; anchor: 'top' | 'bottom' } | null = null;
 const pickEl = document.createElement('div');
 /** Panel wurde für die Punkt-Karte eingeklappt (kleiner Bildschirm) → beim Schließen wieder zeigen */
 let pickHidSheet = false;
@@ -269,7 +271,7 @@ async function createPlan(): Promise<void> {
   planBusy = true;
   renderSheet();
   try {
-    plan = await buildPlan(ev, settings, start, Date.now(), (a, b) => fetchRoute(ev, a, b, settings.mode));
+    plan = await buildPlan(ev, settings, start, Date.now(), (a, b) => fetchRoute(ev, a, b, settings.mode === 'oepnv' ? 'fuss' : settings.mode), fetchJourneys);
     courseMap?.setPlan(
       plan.stops.map((s) => ({ point: s.candidate.point })),
       plan.stops.map((s) => s.route.points),
@@ -294,6 +296,7 @@ function renderPick(): void {
     speed: s.speed,
     athleteIndex: s.athleteIndex,
     route: pick.route,
+    journey: pick.journey,
     arrive: pick.arrive,
     busy: pick.busy,
     locating: pick.locating,
@@ -329,11 +332,38 @@ async function routePick(): Promise<void> {
   const { mode, speed } = currentPlanSettings();
   current.busy = true;
   renderPick();
-  const route = (await fetchRoute(ev, from, current.n.point, mode)) ?? estimatedRoute(from, current.n.point, DETOUR);
+  const to = current.n.point;
+  const now = Date.now();
+  let route: Route;
+  let arrive: number;
+  let journey: Journey | undefined;
+  if (mode === 'oepnv') {
+    // Bus & Bahn ab jetzt; ist Laufen schneller, wird gelaufen
+    const [walk, found] = await Promise.all([fetchRoute(ev, from, to, 'fuss'), fetchJourneys(from, to, now, false)]);
+    const walkRoute = walk ?? estimatedRoute(from, to, DETOUR);
+    const walkEnd = now + (walkRoute.distance / (speed / 3.6)) * 1000;
+    const best = (found ?? []).filter((j) => j.start >= now - 30_000).sort((a, b) => a.end - b.end)[0];
+    if (best && best.end < walkEnd) {
+      journey = best;
+      route = journeyRoute(best, from, to);
+      arrive = best.end;
+    } else if (!found && walkEnd - now > estimateTransitSeconds(from, to, speed) * 1000) {
+      // Fahrplan nicht erreichbar: Schätzung
+      route = estimatedRoute(from, to, DETOUR);
+      arrive = now + estimateTransitSeconds(from, to, speed) * 1000;
+    } else {
+      route = walkRoute;
+      arrive = walkEnd;
+    }
+  } else {
+    route = (await fetchRoute(ev, from, to, mode)) ?? estimatedRoute(from, to, DETOUR);
+    arrive = now + (route.distance / (speed / 3.6)) * 1000;
+  }
   if (pick !== current || event !== ev) return; // inzwischen anderer Punkt oder anderes Rennen
   current.busy = false;
   current.route = route;
-  current.arrive = Date.now() + (route.distance / (speed / 3.6)) * 1000;
+  current.journey = journey;
+  current.arrive = arrive;
   // Hinweis auf die Seite, von der der Weg nicht kommt (sonst verdeckt er ihn)
   current.anchor = from.lat > current.n.point.lat ? 'top' : 'bottom';
   courseMap?.setPickRoute(route.points);
@@ -352,10 +382,12 @@ function bindPick(): void {
       updatePlanSettings({ mode, speed: MODES[mode].kmh });
       const hadRoute = !!pick.route;
       pick.route = null;
+      pick.journey = undefined;
       pick.arrive = null;
       courseMap?.setPickRoute(null);
       renderPick();
       // Plan-Bereich mitziehen, ohne das Panel neu aufzubauen (dort wird evtl. gerade getippt)
+      if (!sheetBusy()) renderSheet();
       document.querySelectorAll<HTMLElement>('#sheet [data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
       const speedInput = document.querySelector<HTMLInputElement>('#plan-speed');
       if (speedInput) speedInput.value = String(MODES[mode].kmh).replace('.', ',');
@@ -454,6 +486,14 @@ function bindEvents(): void {
 
   $('#sheet').addEventListener('change', async (e) => {
     const t = e.target as HTMLElement;
+    if (t.id === 'plan-people') {
+      // Nur der Ticket-Tipp hängt davon ab → Plan behalten
+      const n = Math.round(Number((t as HTMLInputElement).value));
+      if (n >= 1 && n <= 30) updatePlanSettings({ people: n });
+      if (plan) plan = { ...plan, settings: { ...plan.settings, people: currentPlanSettings().people } };
+      renderSheet();
+      return;
+    }
     if (t.id === 'plan-athlete' || t.id === 'plan-stops' || t.id === 'plan-speed') {
       const v = (t as HTMLInputElement | HTMLSelectElement).value;
       if (t.id === 'plan-athlete') updatePlanSettings({ athleteIndex: Number(v) });

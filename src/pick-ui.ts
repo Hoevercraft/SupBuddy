@@ -5,6 +5,7 @@ import { formatDistance, formatKm } from './geo';
 import { DISCIPLINES, type RaceEvent } from './model';
 import { isApple } from './plan-ui';
 import { appleMapsUrl, googleMapsUrl, viaPoints, type Route } from './routing';
+import { legLabel, rideLegs, type Journey } from './transit';
 
 /*
  * Kleine Karte am angetippten Streckenpunkt: wann kommen die Athleten hier vorbei,
@@ -21,6 +22,7 @@ export interface PickView {
   /** Athlet, für den das Urteil („rechtzeitig?“) gilt */
   athleteIndex: number;
   route: Route | null;
+  journey?: Journey;
   /** Ankunftszeit (ms), wenn jetzt losgegangen wird */
   arrive: number | null;
   busy: boolean;
@@ -74,7 +76,8 @@ export function pickHtml(ev: RaceEvent, v: PickView): string {
   let way = '';
   if (v.route && v.arrive !== null) {
     const travel = v.arrive - v.now;
-    const via = viaPoints(v.route);
+    const via = v.mode === 'oepnv' ? [] : viaPoints(v.route);
+    const rides = v.journey ? rideLegs(v.journey) : [];
     const to = v.n.point;
     const google = googleMapsUrl(to, v.mode, via);
     const nav = isApple()
@@ -82,7 +85,12 @@ export function pickHtml(ev: RaceEvent, v: PickView): string {
          <a class="btn btn-small" data-testid="pick-nav-google" href="${google}" target="_blank" rel="noopener">Google Maps</a>`
       : `<a class="btn btn-small" data-testid="pick-nav" href="${google}" target="_blank" rel="noopener">Navigation</a>`;
     way = `
-      <p class="pick-way" data-testid="pick-way">${formatDistance(v.route.distance)} ${mode.verb} · ca. ${duration(travel)}${v.route.routed ? '' : ' (geschätzt)'} · an ca. ${clock(v.arrive)}</p>
+      <p class="pick-way" data-testid="pick-way">${
+        v.journey
+          ? `Bus & Bahn · ca. ${duration(travel)}`
+          : `${formatDistance(v.route.distance)} ${v.mode === 'oepnv' ? (v.route.routed ? 'zu Fuß' : 'mit Bus & Bahn') : mode.verb} · ca. ${duration(travel)}${v.route.routed ? '' : ' (geschätzt)'}`
+      } · an ca. ${clock(v.arrive)}</p>
+      ${rides.length ? `<ol class="stop-legs" data-testid="pick-legs">${rides.map((l) => `<li><strong>${esc(legLabel(l))}</strong> ${clock(l.from.time)} ${esc(l.from.name)}</li>`).join('')}</ol>` : ''}
       ${v.route.crosses ? '<p class="stop-cross" data-testid="pick-cross">⚠ Weg quert die Strecke. Nur queren, wenn gerade niemand kommt.</p>' : ''}
       <div class="pick-actions">${nav}</div>`;
   }
