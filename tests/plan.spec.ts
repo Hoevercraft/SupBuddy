@@ -100,8 +100,29 @@ test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne S
       .poll(async () => (px = await countColorPixels(page, PLAN_COLOR, { x: 0, y: 80, width: vp.width, height: vp.height - 120 }, 45)), { timeout: 10_000 })
       .toBeGreaterThan(120);
   } catch {
-    const state = await page.evaluate(() => (window as unknown as { __supbuddyMap?: () => unknown }).__supbuddyMap?.());
-    throw new Error(`Wege nicht zu sehen (${px} Pixel). Kartenzustand: ${JSON.stringify(state)}`);
+    const state = (await page.evaluate(() => (window as unknown as { __supbuddyMap?: () => unknown }).__supbuddyMap?.())) as {
+      planScreen?: number[][];
+    };
+    // Farben an den Stellen, wo der Weg liegen müsste
+    const png = (await page.screenshot({ scale: 'css' })).toString('base64');
+    const colors = await page.evaluate(
+      async ({ png, pts }) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${png}`;
+        await img.decode();
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext('2d')!;
+        ctx.drawImage(img, 0, 0);
+        return pts.map(([x, y]) => {
+          const d = ctx.getImageData(x, y, 1, 1).data;
+          return `(${x},${y})=#${[d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+        });
+      },
+      { png, pts: state?.planScreen ?? [] },
+    );
+    throw new Error(`Wege nicht zu sehen (${px} Pixel). Farben am Weg: ${colors.join(' ')}. Kartenzustand: ${JSON.stringify(state)}`);
   }
   await context.close();
 });

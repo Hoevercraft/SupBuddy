@@ -305,6 +305,13 @@ export class CourseMap {
       planRoutes: this.planGeoJSON.features.length,
       hasPlanLayer: !!this.map.getLayer('plan-routes'),
       stopPins: this.stopPins.length,
+      renderedPlan: this.map.getLayer('plan-routes') ? this.map.queryRenderedFeatures({ layers: ['plan-routes'] }).length : -1,
+      renderedCourse: this.map.getLayer('course-line') ? this.map.queryRenderedFeatures({ layers: ['course-line'] }).length : -1,
+      planLayerOrder: this.map.getStyle()?.layers?.map((l) => l.id).join(','),
+      // Bildschirmpositionen (CSS-Pixel) entlang des ersten Weges
+      planScreen: (this.planGeoJSON.features[0]?.geometry as { coordinates?: number[][] } | undefined)?.coordinates
+        ?.map((c) => this.map.project([c[0], c[1]]))
+        .map((p) => [Math.round(p.x), Math.round(p.y)]),
       zoom: Math.round(this.map.getZoom() * 10) / 10,
       canvas: `${canvas.width}x${canvas.height}`,
       loaded: this.map.loaded(),
