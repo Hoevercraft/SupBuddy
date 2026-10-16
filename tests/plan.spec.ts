@@ -127,7 +127,9 @@ test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne S
       },
       { png, pts: state?.planScreen ?? [] },
     );
-    throw new Error(`Wege nicht zu sehen (${px} Pixel). Farben am Weg: ${colors.join(' ')}. Kartenzustand: ${JSON.stringify(state)}`);
+    // Lief die Zeit mitten in einer Messung ab (Screenshot unter Volllast), zählt eine frische Messung
+    px = await countColorPixels(page, PLAN_COLOR, { x: 0, y: 80, width: vp.width, height: vp.height - 120 }, 45);
+    if (px <= 120) throw new Error(`Wege nicht zu sehen (${px} Pixel). Farben am Weg: ${colors.join(' ')}. Kartenzustand: ${JSON.stringify(state)}`);
   }
   await context.close();
 });

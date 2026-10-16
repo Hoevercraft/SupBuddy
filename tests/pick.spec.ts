@@ -33,13 +33,42 @@ async function setup(page: Page, starts = ['10:00', '10:05']) {
   await addAthlete(page, 'Max', starts[1], '32');
 }
 
+/** Warten, bis die Karte steht (Kamerafahrten, Panel ein-/ausklappen). */
+async function mapIdle(page: Page): Promise<MapState> {
+  let last = '';
+  let state: MapState | null = null;
+  await expect
+    .poll(
+      async () => {
+        state = await mapState(page);
+        const key = JSON.stringify(state.courseScreen) + (await page.locator('#sheet').boundingBox())?.y;
+        const same = key === last;
+        last = key;
+        return same;
+      },
+      { intervals: [400], timeout: 15_000 },
+    )
+    .toBe(true);
+  return state!;
+}
+
+/** Freier Kartenbereich (ohne Startnummer und Panel) – dort wird nach Weg-Pixeln gezählt. */
+async function mapArea(page: Page) {
+  const vp = page.viewportSize()!;
+  const sheet = await page.locator('#sheet').boundingBox();
+  const visible = await page.locator('#sheet').isVisible();
+  const x = visible && sheet && sheet.width < vp.width * 0.9 ? sheet.x + sheet.width + 4 : 0;
+  const bottom = visible && sheet && sheet.width >= vp.width * 0.9 ? sheet.y : vp.height;
+  return { x, y: 80, width: vp.width - x, height: Math.max(10, bottom - 80) };
+}
+
 /** Ein Streckenpunkt, der frei auf der Karte liegt (nichts darüber), möglichst weit weg von den Rändern. */
 async function freeCoursePoint(page: Page): Promise<[number, number]> {
   let pick: [number, number] | null = null;
   await expect
     .poll(
       async () => {
-        const { courseScreen } = await mapState(page);
+        const { courseScreen } = await mapIdle(page);
         pick = await page.evaluate((pts) => {
           const w = window.innerWidth;
           const ok = pts.filter(([x, y]) => {
@@ -61,7 +90,7 @@ async function freeCoursePoint(page: Page): Promise<[number, number]> {
 
 /** Ein freier Kartenpunkt mit Abstand ≥ 80 px zur Strecke. */
 async function freeOffCoursePoint(page: Page): Promise<[number, number]> {
-  const { courseScreen } = await mapState(page);
+  const { courseScreen } = await mapIdle(page);
   const p = await page.evaluate((pts) => {
     const segDist = (x: number, y: number, a: number[], b: number[]) => {
       const dx = b[0] - a[0];
@@ -157,19 +186,16 @@ test('Strecke antippen → Zeiten am Punkt, Weg hierhin mit Urteil, Weg auf der 
   expect(await nav.getAttribute('href')).toMatch(/travelmode=walking|mode=walking/);
 
   // Weg wirklich gezeichnet (keine Plan-Wege vorhanden → Farbe stammt vom Tipp-Weg)
-  const vp = page.viewportSize()!;
   await expect.poll(async () => (await mapState(page)).pickRoutes).toBe(1);
-  await expect
-    .poll(async () => countColorPixels(page, PLAN_COLOR, { x: 0, y: 0, width: vp.width, height: vp.height }, 45), { timeout: 25_000 })
-    .toBeGreaterThan(60);
+  await mapIdle(page);
+  await expect.poll(async () => countColorPixels(page, PLAN_COLOR, await mapArea(page), 45), { timeout: 25_000 }).toBeGreaterThan(60);
 
   // Schließen: Karte und Weg weg
   await page.locator('.pick-popup .maplibregl-popup-close-button').click();
   await expect(pop).toHaveCount(0);
   await expect.poll(async () => (await mapState(page)).pickRoutes).toBe(0);
-  await expect
-    .poll(async () => countColorPixels(page, PLAN_COLOR, { x: 0, y: 0, width: vp.width, height: vp.height }, 45), { timeout: 10_000 })
-    .toBeLessThan(15);
+  await mapIdle(page);
+  await expect.poll(async () => countColorPixels(page, PLAN_COLOR, await mapArea(page), 45), { timeout: 10_000 }).toBeLessThan(15);
   await context.close();
 });
 
