@@ -495,3 +495,5 @@ body:not(.has-event) .ctrl-maponly { display: none; }
 }
 
 .stop-via { font-size: 13px; color: var(--ink-soft); margin: 0 0 6px !important; }
+
+.stop-cross { font-size: 14px; font-weight: 600; color: var(--danger); margin: 2px 0; }

@@ -1,4 +1,4 @@
-import { MODES, nogoLines, type Mode } from './cheer';
+import { crossesCourse, MODES, nogoLines, type Mode } from './cheer';
 import { haversine } from './geo';
 import type { Point, RaceEvent } from './model';
 
@@ -18,6 +18,8 @@ export interface Route {
   distance: number;
   /** true = echte Route, false = Schätzung (Luftlinie × Umweg) */
   routed: boolean;
+  /** Weg quert die Strecke (ohne Queren war kein Weg zu finden) */
+  crosses?: boolean;
 }
 
 const fmt = (p: Point) => `${p.lng.toFixed(5)},${p.lat.toFixed(5)}`;
@@ -39,12 +41,16 @@ export function routeUrl(ev: RaceEvent, from: Point, to: Point, mode: Mode): str
   return `${BROUTER_URL}?lonlats=${fmt(from)}|${fmt(to)}&profile=${MODES[mode].profile}&alternativeidx=0&format=geojson`;
 }
 
-/** Echte Route holen; bei Fehler oder Zeitüberschreitung null. */
-export async function fetchRoute(ev: RaceEvent, from: Point, to: Point, mode: Mode, timeoutMs = 15_000): Promise<Route | null> {
+/** URL ohne Sperrlinien (direkter Weg). */
+export function plainRouteUrl(from: Point, to: Point, mode: Mode): string {
+  return `${BROUTER_URL}?lonlats=${fmt(from)}|${fmt(to)}&profile=${MODES[mode].profile}&alternativeidx=0&format=geojson`;
+}
+
+async function getRoute(url: string, timeoutMs: number): Promise<Route | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(routeUrl(ev, from, to, mode), { signal: ctrl.signal });
+    const res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok) return null;
     const data = await res.json();
     const f = data?.features?.[0];
@@ -60,6 +66,21 @@ export async function fetchRoute(ev: RaceEvent, from: Point, to: Point, mode: Mo
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Echte Route holen; bei Fehler oder Zeitüberschreitung null.
+ * Erst der direkte Weg – quert er die Strecke nicht, wird er genommen (an der Strecke
+ * entlang ankommen ist erlaubt). Nur wenn er quert, wird mit der Strecke als Sperre neu geroutet.
+ */
+export async function fetchRoute(ev: RaceEvent, from: Point, to: Point, mode: Mode, timeoutMs = 15_000): Promise<Route | null> {
+  const plain = await getRoute(plainRouteUrl(from, to, mode), timeoutMs);
+  if (plain && !crossesCourse(ev, plain.points)) return plain;
+  const safe = await getRoute(routeUrl(ev, from, to, mode), timeoutMs);
+  if (safe) return safe;
+  // Ohne Queren kein Weg (z. B. Ziel liegt in einer von der Strecke umschlossenen „Insel“):
+  // dann den direkten Weg nehmen, aber kenntlich machen.
+  return plain ? { ...plain, crosses: true } : null;
 }
 
 /** Ersatz, wenn das Routing nicht erreichbar ist. */
