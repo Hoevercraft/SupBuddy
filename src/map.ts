@@ -187,6 +187,7 @@ export class CourseMap {
   private stopPins: maplibregl.Marker[] = [];
   private planGeoJSON: FeatureCollection = { type: 'FeatureCollection', features: [] };
   private usingFallback = false;
+  private contextLost = 0;
   private mapOnlyToggle: MapOnlyToggle;
 
   constructor(container: HTMLElement, { onPosition, onToggleMapOnly, getPadding }: CourseMapOptions) {
@@ -218,6 +219,7 @@ export class CourseMap {
       }
     });
     this.map.on('style.load', () => this.addCourseLayers());
+    this.map.on('webglcontextlost', () => this.contextLost++);
 
     this.locator = new LocateControl(
       (p) => {
@@ -305,6 +307,8 @@ export class CourseMap {
       planRoutes: this.planGeoJSON.features.length,
       hasPlanLayer: !!this.map.getLayer('plan-routes'),
       stopPins: this.stopPins.length,
+      glLost: (this.map.getCanvas().getContext('webgl2') ?? this.map.getCanvas().getContext('webgl'))?.isContextLost() ?? 'n/a',
+      contextLostEvents: this.contextLost,
       renderedPlan: this.map.getLayer('plan-routes') ? this.map.queryRenderedFeatures({ layers: ['plan-routes'] }).length : -1,
       renderedCourse: this.map.getLayer('course-line') ? this.map.queryRenderedFeatures({ layers: ['course-line'] }).length : -1,
       planLayerOrder: this.map.getStyle()?.layers?.map((l) => l.id).join(','),
