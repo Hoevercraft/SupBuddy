@@ -295,3 +295,127 @@ body:not(.has-event) .ctrl-maponly { display: none; }
   visibility: hidden;
   transition: transform 0.2s ease, visibility 0s 0.2s;
 }
+
+/* ---------------------------------------------------------------- Athleten */
+
+.sheet-sub {
+  font: 800 19px/1.2 var(--font-sign);
+  margin: 18px 0 6px;
+}
+
+.athletes { margin: 4px 0 6px; }
+
+.athletes-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.athletes-head h3 { font: 800 19px/1.2 var(--font-sign); margin: 6px 0; }
+
+.race-day { font-size: 14px; color: var(--ink-soft); display: inline-flex; gap: 6px; align-items: center; }
+.race-day input {
+  font: inherit;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: #fff;
+}
+
+.athlete-list { list-style: none; margin: 4px 0 12px; padding: 0; }
+
+.athlete {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.athlete:first-child { border-top: 1px solid var(--line); }
+
+.athlete-dot {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--athlete-color);
+  color: #fff;
+  font: 800 15px/1 var(--font-sign);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1.5px var(--ink);
+}
+
+.athlete-name { font-weight: 600; }
+.athlete-status { font-size: 15px; }
+.athlete-here {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 2px;
+  padding-left: 8px;
+  border-left: 3px solid var(--athlete-color);
+}
+
+.athlete-edit {
+  font: 600 14px/1 var(--font-body);
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 36px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+/* Marker auf der Karte */
+.athlete-pin {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.athlete-pin-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--athlete-color);
+  color: #fff;
+  font: 800 12px/1 var(--font-sign);
+  border: 2.5px solid #fff;
+  box-shadow: 0 0 0 1.5px var(--ink), 0 2px 4px rgb(0 0 0 / 0.25);
+}
+.athlete-pin-name {
+  font: 700 13px/1 var(--font-sign);
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.92);
+  padding: 3px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* Athleten-Dialog */
+.athlete-dialog form { display: grid; gap: 10px; }
+.athlete-dialog h2 { margin-bottom: 2px; }
+.field { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; }
+.field[hidden] { display: none; }
+.field > span:first-child { font-weight: 600; }
+.athlete-dialog input {
+  font: 17px/1.2 var(--font-body);
+  color: var(--ink);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  width: 100%;
+  margin: 0;
+  background: #fff;
+}
+.with-unit { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--ink-soft); white-space: nowrap; }
+.with-unit input { width: 84px; flex: none; }
+.form-error { color: var(--danger); font-weight: 600; margin: 0; }
+.form-error[hidden] { display: none; }
+.btn-danger { color: var(--danger); justify-self: start; }

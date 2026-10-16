@@ -19,9 +19,38 @@ export interface Leg {
   elevationGain: number | null;
 }
 
+/** Pace je Disziplin, in den Einheiten, in denen Sportler sie kennen. */
+export interface Pace {
+  /** Sekunden pro 100 m */
+  schwimmen: number;
+  /** km/h */
+  rad: number;
+  /** Sekunden pro km */
+  lauf: number;
+}
+
+export interface Athlete {
+  name: string;
+  color: string;
+  /** Startzeit am Renntag, "HH:MM" (Ortszeit) */
+  start: string;
+  pace: Pace;
+  /** Dauer je Wechsel in Sekunden (T1/T2 oder Wechsel-Etappe) */
+  transition: number;
+}
+
+export const DEFAULT_PACE: Pace = { schwimmen: 120, rad: 30, lauf: 330 };
+export const DEFAULT_TRANSITION = 180;
+
+/** Gut unterscheidbare Athletenfarben, die sich von den Disziplinfarben abheben. */
+export const ATHLETE_COLORS = ['#d62839', '#1d4ed8', '#0f766e', '#a21caf', '#b45309', '#334155'];
+
 export interface RaceEvent {
   name: string;
   legs: Leg[];
+  /** Renntag "YYYY-MM-DD"; null = heute */
+  date: string | null;
+  athletes: Athlete[];
 }
 
 export type EventKind = 'Radrennen' | 'Lauf' | 'Triathlon' | 'Rennen';

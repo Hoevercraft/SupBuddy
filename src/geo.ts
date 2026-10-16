@@ -19,6 +19,24 @@ export function pathLength(points: Point[]): number {
   return sum;
 }
 
+/** Punkt nach `distance` Metern entlang des Linienzugs (an den Enden begrenzt). */
+export function pointAtDistance(points: Point[], distance: number): Point {
+  if (points.length === 0) throw new Error('Leerer Linienzug');
+  if (distance <= 0) return points[0];
+  let rest = distance;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const d = haversine(a, b);
+    if (rest <= d) {
+      const t = d === 0 ? 0 : rest / d;
+      return { lat: a.lat + t * (b.lat - a.lat), lng: a.lng + t * (b.lng - a.lng) };
+    }
+    rest -= d;
+  }
+  return points[points.length - 1];
+}
+
 /**
  * Positive Höhenmeter mit einfacher Glättung (Schwelle),
  * damit GPS-Rauschen nicht aufsummiert wird.

@@ -73,6 +73,8 @@ test('Teilen-Link öffnet dieselbe Strecke auf einem anderen Gerät', async ({ p
   expect(before).toMatch(/km/);
 
   await page.getByRole('button', { name: 'Link teilen' }).click();
+  // Link wird asynchron erzeugt (Kompression) → erst warten, bis er da ist
+  await expect(page.getByTestId('share-link')).toHaveValue(/#e=[A-Za-z0-9_-]+$/);
   const link = await page.getByTestId('share-link').inputValue();
   expect(link).toMatch(/#e=[A-Za-z0-9_-]+$/);
 

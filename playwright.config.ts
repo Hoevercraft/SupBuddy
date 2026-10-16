@@ -11,6 +11,9 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:4173',
     trace: 'retain-on-failure',
+    // Uhrzeiten im Zeitplan sind Ortszeit: Tests laufen wie ein Gerät in Deutschland
+    timezoneId: 'Europe/Berlin',
+    locale: 'de-DE',
     // WebGL für MapLibre im Headless-Browser (Software-Rendering)
     launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] },
   },

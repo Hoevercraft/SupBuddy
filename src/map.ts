@@ -70,6 +70,26 @@ class MapOnlyToggle implements maplibregl.IControl {
   }
 }
 
+export interface AthleteMarker {
+  label: string;
+  name: string;
+  color: string;
+  /** null = nicht auf der Strecke (vor dem Start oder im Ziel) */
+  point: Point | null;
+}
+
+function athleteElement(a: AthleteMarker): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'athlete-pin';
+  el.dataset.testid = 'athlete-pin';
+  el.style.setProperty('--athlete-color', a.color);
+  el.innerHTML = '<span class="athlete-pin-dot"></span><span class="athlete-pin-name"></span>';
+  el.querySelector('.athlete-pin-dot')!.textContent = a.label;
+  el.querySelector('.athlete-pin-name')!.textContent = a.name;
+  el.title = `${a.name} – Position laut Plan`;
+  return el;
+}
+
 export interface CourseMapOptions {
   onPosition: (p: Point | null) => void;
   onToggleMapOnly: () => void;
@@ -80,6 +100,7 @@ export class CourseMap {
   private geolocate: maplibregl.GeolocateControl;
   private event: RaceEvent | null = null;
   private pins: maplibregl.Marker[] = [];
+  private athletePins = new Map<string, maplibregl.Marker>();
   private usingFallback = false;
   private mapOnlyToggle: MapOnlyToggle;
 
@@ -191,6 +212,30 @@ export class CourseMap {
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 3, 15, 6],
       },
     });
+  }
+
+  /** Athleten an ihre Plan-Position setzen (wiederverwendet Marker, damit nichts flackert). */
+  setAthletes(items: AthleteMarker[]): void {
+    const keep = new Set<string>();
+    for (const a of items) {
+      if (!a.point) continue;
+      const key = `${a.name}|${a.color}`;
+      keep.add(key);
+      let m = this.athletePins.get(key);
+      if (!m) {
+        m = new maplibregl.Marker({ element: athleteElement(a), anchor: 'left', offset: [-14, 0] });
+        m.setLngLat([a.point.lng, a.point.lat]).addTo(this.map);
+        this.athletePins.set(key, m);
+      } else {
+        m.setLngLat([a.point.lng, a.point.lat]);
+      }
+    }
+    for (const [key, m] of this.athletePins) {
+      if (!keep.has(key)) {
+        m.remove();
+        this.athletePins.delete(key);
+      }
+    }
   }
 
   private updatePins(): void {
