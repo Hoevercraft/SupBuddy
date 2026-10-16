@@ -13,12 +13,14 @@ import { timeAtAlong, timeline, type Timeline } from './schedule';
  *    (Luftlinie × Umwegfaktor), danach mit echten Routen nachgerechnet.
  */
 
-export type Mode = 'fuss' | 'rad' | 'scooter';
+export type Mode = 'fuss' | 'rad' | 'scooter' | 'oepnv';
 
 export const MODES: Record<Mode, { label: string; verb: string; kmh: number; profile: string; google: string }> = {
   fuss: { label: 'Zu Fuß', verb: 'zu Fuß', kmh: 4.5, profile: 'shortest', google: 'walking' },
   rad: { label: 'Rad', verb: 'mit dem Rad', kmh: 15, profile: 'trekking', google: 'bicycling' },
   scooter: { label: 'E-Scooter', verb: 'mit dem E-Scooter', kmh: 18, profile: 'trekking', google: 'bicycling' },
+  // Bus & Bahn: Fahrplan von Transitous; kmh = Gehtempo für Fußwege und Schätzungen
+  oepnv: { label: 'Bus & Bahn', verb: 'mit Bus & Bahn', kmh: 4.5, profile: 'shortest', google: 'transit' },
 };
 
 /** Vor dem Athleten da sein: so viel Puffer vor seiner Durchgangszeit. */
