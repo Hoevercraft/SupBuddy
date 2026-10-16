@@ -19,6 +19,9 @@ import { GpxError, parseGpx } from './gpx';
 import { DISCIPLINES, eventKind, type Discipline, type Point, type RaceEvent } from './model';
 import { decodeEvent, normalizeLeg, shareUrl, tokenFromHash } from './share';
 import { loadEvent, saveEvent } from './store';
+import { randomId, withIds } from './ids';
+import { setSightingOffsets } from './schedule';
+import { alongsNear, latestByAthlete, offsetsFrom, sightingAlong, SightingStore } from './sightings';
 
 export const APP_VERSION = __APP_VERSION__;
 /** Zum Troubleshooting: ändert sich mit jedem Deploy. */
@@ -40,6 +43,9 @@ let courseMap: import('./map').CourseMap | null = null;
 /** Angetippter Streckenpunkt (Karte am Punkt) */
 let pick: { n: CourseNearest; route: Route | null; journey?: Journey; arrive: number | null; busy: boolean; locating: boolean; anchor: 'top' | 'bottom' } | null = null;
 const pickEl = document.createElement('div');
+/** Sichtungen des aktuellen Events (geteilt über Supabase) */
+const sightings = new SightingStore(onSightingsChange);
+let lastOffsets = new Map<string, number>();
 /** Panel wurde für die Punkt-Karte eingeklappt (kleiner Bildschirm) → beim Schließen wieder zeigen */
 let pickHidSection: Section | null = null;
 
@@ -166,6 +172,7 @@ function renderStatus(): void {
 /** Bereich öffnen/schließen (null = alle zu). */
 function setSection(s: Section | null): void {
   section = event ? s : null;
+  if (section === 'athleten') void sightings.refresh();
   if (section && mapOnly) setMapOnly(false);
   document.body.dataset.section = section ?? '';
   courseMap?.setSection(section);
@@ -211,7 +218,11 @@ function renderSheet(): void {
   }
   const body =
     section === 'athleten'
-      ? `${positionText()}${athletesSection(event, position, Date.now())}`
+      ? `${positionText()}${athletesSection(event, position, Date.now(), {
+          latest: latestByAthlete(sightings.list),
+          atCourse: !!position && alongsNear(event, position).length > 0,
+          sync: sightings.state,
+        })}`
       : section === 'plan'
         ? `${planSection(event, { settings: currentPlanSettings(), plan, busy: planBusy, fromPosition: !!position, now: Date.now() })}
            <p class="hint pick-tip" data-testid="pick-tip">Tipp: Tippe auf die Strecke – du siehst, wann deine Athleten dort sind, und den Weg dorthin.</p>`
@@ -452,11 +463,51 @@ function bindPick(): void {
   });
 }
 
+// ---------------------------------------------------------------- Sichtungen
+
+/** Zeitplan-Korrekturen aus den Sichtungen setzen; true = hat sich spürbar geändert. */
+function applyOffsets(): boolean {
+  const next = event ? offsetsFrom(event, sightings.list, new Date()) : new Map<string, number>();
+  setSightingOffsets(next);
+  const keys = new Set([...next.keys(), ...lastOffsets.keys()]);
+  const changed = [...keys].some((k) => Math.abs((next.get(k) ?? 0) - (lastOffsets.get(k) ?? 0)) > 60_000);
+  lastOffsets = next;
+  return changed;
+}
+
+function onSightingsChange(): void {
+  const changed = applyOffsets();
+  renderAthleteMarkers();
+  renderStatus();
+  // Sichtungen sind die Antwort auf einen eigenen Tipp oder neue Infos → gleich zeigen,
+  // außer jemand tippt gerade in ein Feld
+  const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLSelectElement;
+  if (!sheetBusy() || changed || (!typing && !$<HTMLDialogElement>('#athlete-dialog').open)) renderSheet();
+  // Der Plan beruht auf den alten Zeiten → mit der echten Zeit neu planen
+  if (changed && plan && !planBusy) void createPlan();
+  document.body.dataset.sightings = String(sightings.list.length);
+}
+
+async function sightAthlete(i: number): Promise<void> {
+  const a = event?.athletes[i];
+  if (!event || !a?.id || !position) return;
+  const now = Date.now();
+  const along = sightingAlong(event, a, position, now);
+  if (along === null) {
+    toast('Du bist zu weit von der Strecke weg (mehr als 150 m).', 'error');
+    return;
+  }
+  toast(`${a.name} bei km ${formatKm(along).replace(' km', '')} gesichtet – Zeitplan angepasst.`);
+  await sightings.add(a.id, along, now);
+}
+
 async function setEvent(ev: RaceEvent | null, fit = true): Promise<void> {
   // Strecke oder Athleten geändert → alter Plan passt nicht mehr
   if (plan) clearPlan();
   courseMap?.closePick();
-  event = ev && ev.legs.length > 0 ? ev : null;
+  event = ev && ev.legs.length > 0 ? withIds(ev) : null;
+  sightings.setEvent(event?.athletes.length ? (event.id ?? null) : null);
+  applyOffsets();
   if (!event) section = null;
   render(fit);
   await saveEvent(event);
@@ -527,6 +578,11 @@ function bindEvents(): void {
     if (t.closest('#btn-load')) fileInput.click();
     else if (t.closest('#btn-share')) await openShare();
     else if (t.closest('[data-close-section]')) setSection(null);
+    else if (t.closest('[data-sight]')) await sightAthlete(Number((t.closest('[data-sight]') as HTMLElement).dataset.sight));
+    else if (t.closest('[data-unsight]')) {
+      await sightings.remove((t.closest('[data-unsight]') as HTMLElement).dataset.unsight!);
+      toast('Sichtung zurückgenommen.');
+    }
     else if (t.closest('#btn-locate')) courseMap?.locate();
     else if (t.closest('[data-mode]')) {
       const m = (t.closest('[data-mode]') as HTMLElement).dataset.mode as Mode;
@@ -633,6 +689,8 @@ function bindEvents(): void {
     }
     const idx = athleteDialog.dataset.index;
     const athletes = [...event.athletes];
+    // Kennung behalten (Sichtungen hängen daran), neue Athleten bekommen eine zufällige
+    result.id = idx ? event.athletes[Number(idx)]?.id : randomId(12);
     if (idx) athletes[Number(idx)] = result;
     else athletes.push(result);
     athleteDialog.close();
@@ -724,7 +782,11 @@ async function start(): Promise<void> {
   }
 
   if (!(await loadFromHash())) {
-    event = await loadEvent();
+    const loaded = await loadEvent();
+    event = loaded && loaded.legs.length ? withIds(loaded) : null;
+    if (event !== loaded) await saveEvent(event);
+    sightings.setEvent(event?.athletes.length ? (event.id ?? null) : null);
+    applyOffsets();
     render(true);
   }
   document.body.dataset.ready = 'true';
@@ -732,4 +794,11 @@ async function start(): Promise<void> {
 
 void start();
 window.setInterval(tick, 15_000);
+// Sichtungen der anderen abholen (nur wenn die App sichtbar ist)
+window.setInterval(() => {
+  if (event?.athletes.length && document.visibilityState === 'visible') void sightings.refresh();
+}, 20_000);
+document.addEventListener('visibilitychange', () => {
+  if (event?.athletes.length && document.visibilityState === 'visible') void sightings.refresh();
+});
 registerSW({ immediate: true });

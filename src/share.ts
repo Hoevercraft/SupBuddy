@@ -1,4 +1,5 @@
 import { simplify } from './geo';
+import { ID_RE } from './ids';
 import { DISCIPLINES, type Athlete, type Discipline, type Leg, type Point, type RaceEvent } from './model';
 
 /*
@@ -72,6 +73,8 @@ interface WireAthlete {
   p: [number, number, number];
   /** Wechsel in s */
   w: number;
+  /** Kennung (optional; ältere Links haben keine) */
+  i?: string;
 }
 interface WireEvent {
   v: number;
@@ -81,6 +84,8 @@ interface WireEvent {
   d?: string;
   /** Athleten (optional; ältere Links haben keine) */
   a?: WireAthlete[];
+  /** Event-Kennung (optional; ältere Links haben keine) */
+  i?: string;
 }
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -88,13 +93,15 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 function athleteToWire(a: Athlete): WireAthlete {
-  return {
+  const w: WireAthlete = {
     n: a.name,
     c: a.color,
     s: a.start,
     p: [Math.round(a.pace.schwimmen), Math.round(a.pace.rad * 10), Math.round(a.pace.lauf)],
     w: Math.round(a.transition),
   };
+  if (a.id) w.i = a.id;
+  return w;
 }
 
 function athleteFromWire(w: WireAthlete): Athlete {
@@ -109,13 +116,15 @@ function athleteFromWire(w: WireAthlete): Athlete {
     Number.isFinite(w.w) &&
     w.w >= 0;
   if (!ok) throw new Error('Athlet im Link ist beschädigt');
-  return {
+  const a: Athlete = {
     name: w.n.slice(0, 40),
     color: w.c,
     start: w.s,
     pace: { schwimmen: w.p[0], rad: w.p[1] / 10, lauf: w.p[2] },
     transition: w.w,
   };
+  if (typeof w.i === 'string' && ID_RE.test(w.i)) a.id = w.i;
+  return a;
 }
 
 function legToWire(leg: Leg): WireLeg {
@@ -154,6 +163,7 @@ export function eventToWire(ev: RaceEvent): WireEvent {
   const wire: WireEvent = { v: FORMAT_VERSION, n: ev.name, l: ev.legs.map(legToWire) };
   if (ev.date) wire.d = ev.date;
   if (ev.athletes.length) wire.a = ev.athletes.map(athleteToWire);
+  if (ev.id) wire.i = ev.id;
   return wire;
 }
 
@@ -162,12 +172,14 @@ export function eventFromWire(data: unknown): RaceEvent {
   if (!w || typeof w !== 'object' || w.v !== FORMAT_VERSION || !Array.isArray(w.l)) {
     throw new Error('Unbekanntes oder beschädigtes Event-Format');
   }
-  return {
+  const ev: RaceEvent = {
     name: typeof w.n === 'string' ? w.n : 'Rennen',
     legs: w.l.map(legFromWire),
     date: typeof w.d === 'string' && DATE_RE.test(w.d) ? w.d : null,
     athletes: Array.isArray(w.a) ? w.a.map(athleteFromWire) : [],
   };
+  if (typeof w.i === 'string' && ID_RE.test(w.i)) ev.id = w.i;
+  return ev;
 }
 
 // ---------- Kompression + Base64url ----------
