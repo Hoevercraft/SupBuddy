@@ -27,6 +27,8 @@ jobs:
       - run: npm install
       - run: npx playwright install --with-deps chromium webkit
       - run: npm test
+      # TEMP Stresstest Bereiche – wird wieder entfernt
+      - run: npx playwright test tests/sections.spec.ts tests/pick.spec.ts tests/visual.spec.ts tests/smoke.spec.ts --repeat-each=3 --retries=0
       # Bericht mit Screenshots immer hochladen, damit man das Ergebnis auch ansehen kann
       - uses: actions/upload-artifact@v4
         if: always()
