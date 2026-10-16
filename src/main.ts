@@ -19,6 +19,7 @@ export const BUILD_LABEL = `v${__APP_VERSION__} · ${__APP_COMMIT__} · ${__APP_
 
 let event: RaceEvent | null = null;
 let position: Point | null = null;
+let mapOnly = false;
 let courseMap: import('./map').CourseMap | null = null;
 
 // ---------------------------------------------------------------- Hilfen
@@ -160,7 +161,16 @@ function renderSheet(): void {
   `;
 }
 
+/** Vollbild-Karte: Startnummer und Panel ausblenden. */
+function setMapOnly(on: boolean): void {
+  mapOnly = on && !!event;
+  document.body.classList.toggle('map-only', mapOnly);
+  courseMap?.setMapOnly(mapOnly);
+}
+
 function render(fit = false): void {
+  document.body.classList.toggle('has-event', !!event);
+  if (!event && mapOnly) setMapOnly(false);
   renderBib();
   renderSheet();
   courseMap?.setEvent(event, fit);
@@ -293,9 +303,12 @@ async function start(): Promise<void> {
 
   try {
     const { CourseMap } = await import('./map');
-    courseMap = new CourseMap($('#map'), (p) => {
-      position = p;
-      renderSheet();
+    courseMap = new CourseMap($('#map'), {
+      onPosition: (p) => {
+        position = p;
+        renderSheet();
+      },
+      onToggleMapOnly: () => setMapOnly(!mapOnly),
     });
   } catch (e) {
     console.warn('Karte nicht verfügbar:', e);

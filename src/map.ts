@@ -34,14 +34,56 @@ function pinElement(text: string, cls: string): HTMLElement {
   return el;
 }
 
+const ICON_EXPAND =
+  '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
+const ICON_COLLAPSE =
+  '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
+
+/** Knopf auf der Karte: blendet Startnummer und Panel aus/ein. */
+class MapOnlyToggle implements maplibregl.IControl {
+  private container = document.createElement('div');
+  private button = document.createElement('button');
+
+  constructor(private onToggle: () => void) {
+    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group ctrl-maponly';
+    this.button.type = 'button';
+    this.button.className = 'ctrl-maponly-btn';
+    this.button.addEventListener('click', () => this.onToggle());
+    this.container.appendChild(this.button);
+    this.setPressed(false);
+  }
+
+  setPressed(on: boolean): void {
+    const label = on ? 'Vollbild beenden' : 'Vollbild';
+    this.button.setAttribute('aria-pressed', String(on));
+    this.button.setAttribute('aria-label', label);
+    this.button.title = label;
+    this.button.innerHTML = on ? ICON_COLLAPSE : ICON_EXPAND;
+  }
+
+  onAdd(): HTMLElement {
+    return this.container;
+  }
+
+  onRemove(): void {
+    this.container.remove();
+  }
+}
+
+export interface CourseMapOptions {
+  onPosition: (p: Point | null) => void;
+  onToggleMapOnly: () => void;
+}
+
 export class CourseMap {
   private map: maplibregl.Map;
   private geolocate: maplibregl.GeolocateControl;
   private event: RaceEvent | null = null;
   private pins: maplibregl.Marker[] = [];
   private usingFallback = false;
+  private mapOnlyToggle: MapOnlyToggle;
 
-  constructor(container: HTMLElement, onPosition: (p: Point | null) => void) {
+  constructor(container: HTMLElement, { onPosition, onToggleMapOnly }: CourseMapOptions) {
     this.map = new maplibregl.Map({
       container,
       style: STYLE_URL,
@@ -51,7 +93,11 @@ export class CourseMap {
       attributionControl: false,
       dragRotate: false,
       pitchWithRotate: false,
+      // Bild nach dem Zeichnen behalten: Screenshots (Tests, Teilen) zeigen dann genau das Angezeigte
+      canvasContextAttributes: { preserveDrawingBuffer: true },
     });
+    // Zustand für Fehlersuche und Tests abrufbar machen
+    (window as unknown as { __supbuddyMap?: () => unknown }).__supbuddyMap = () => this.debugState();
     this.map.touchZoomRotate.disableRotation();
 
     this.map.on('error', (e) => {
@@ -72,6 +118,8 @@ export class CourseMap {
       showAccuracyCircle: true,
     });
     this.map.addControl(this.geolocate, 'top-right');
+    this.mapOnlyToggle = new MapOnlyToggle(onToggleMapOnly);
+    this.map.addControl(this.mapOnlyToggle, 'top-right');
     this.map.addControl(new maplibregl.AttributionControl({
         compact: true,
         // Immer sichtbar, auch wenn nur der Ersatzstil geladen ist
@@ -81,6 +129,10 @@ export class CourseMap {
       onPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
     );
     this.geolocate.on('error', () => onPosition(null));
+  }
+
+  setMapOnly(on: boolean): void {
+    this.mapOnlyToggle.setPressed(on);
   }
 
   /** Standort anfordern (zeigt beim ersten Mal die Berechtigungsabfrage). */
@@ -100,7 +152,23 @@ export class CourseMap {
     const all = this.event?.legs.flatMap((l) => l.points) ?? [];
     const b = bounds(all);
     if (!b) return;
-    this.map.fitBounds(b, { padding: { top: 140, bottom: 260, left: 40, right: 40 }, maxZoom: 15, duration: 0 });
+    this.map.fitBounds(b, { padding: { top: 100, bottom: 260, left: 40, right: 60 }, maxZoom: 15, duration: 0 });
+  }
+
+  /** Kurzbericht zum Kartenzustand (für Tests und Fehlersuche). */
+  debugState() {
+    const src = this.map.getSource('course') as GeoJSONSource | undefined;
+    const canvas = this.map.getCanvas();
+    return {
+      styleLoaded: this.map.isStyleLoaded(),
+      usingFallback: this.usingFallback,
+      hasCourseSource: !!src,
+      hasCourseLayer: !!this.map.getLayer('course-line'),
+      legs: this.event?.legs.length ?? 0,
+      zoom: Math.round(this.map.getZoom() * 10) / 10,
+      canvas: `${canvas.width}x${canvas.height}`,
+      loaded: this.map.loaded(),
+    };
   }
 
   private addCourseLayers(): void {

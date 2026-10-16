@@ -35,12 +35,15 @@ test('Karte füllt den Bildschirm und zeichnet die Strecke', async ({ page }) =>
   expect(canvas!.width).toBeGreaterThan(vp.width * 0.8);
 
   // Und auf dem Bild müssen wirklich orange Streckenpixel zu sehen sein
-  await expect
-    .poll(async () => countColorPixels(page, RAD, await freeMapArea(page)), {
-      message: 'Strecke ist auf der Karte nicht zu sehen',
-      timeout: 10_000,
-    })
-    .toBeGreaterThan(300);
+  let pixels = 0;
+  try {
+    await expect
+      .poll(async () => (pixels = await countColorPixels(page, RAD, await freeMapArea(page))), { timeout: 10_000 })
+      .toBeGreaterThan(300);
+  } catch {
+    const state = await page.evaluate(() => (window as unknown as { __supbuddyMap?: () => unknown }).__supbuddyMap?.());
+    throw new Error(`Strecke ist auf der Karte nicht zu sehen (${pixels} Pixel). Kartenzustand: ${JSON.stringify(state)}`);
+  }
 });
 
 test('Ohne Strecke ist auf der Karte nichts Oranges', async ({ page }) => {
@@ -76,4 +79,46 @@ test('Screenshot für die Durchsicht', async ({ page }, info) => {
   await expect(page.getByTestId('leg')).toHaveCount(3);
   await page.waitForTimeout(800);
   await info.attach('triathlon', { body: await page.screenshot(), contentType: 'image/png' });
+});
+
+test('Startnummer ist kompakt und überlappt die Kartenknöpfe nicht', async ({ page }) => {
+  await openApp(page);
+  await page.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await expect(page.locator('#event-kind')).toHaveText('Radrennen');
+  const bib = (await page.locator('#bib').boundingBox())!;
+  expect(bib.height, 'Startnummer zu hoch').toBeLessThanOrEqual(70);
+  for (const sel of ['.maplibregl-ctrl-geolocate', '.ctrl-maponly-btn', '.maplibregl-ctrl-attrib']) {
+    const c = (await page.locator(sel).boundingBox())!;
+    const overlap = c.x < bib.x + bib.width && c.x + c.width > bib.x && c.y < bib.y + bib.height && c.y + c.height > bib.y;
+    expect(overlap, `${sel} überlappt die Startnummer`).toBe(false);
+  }
+});
+
+test('Vollbild: ein Knopf blendet Startnummer und Panel aus und wieder ein', async ({ page }) => {
+  await openApp(page);
+  // Ohne Strecke gibt es nichts zu zeigen → kein Vollbild-Knopf
+  await expect(page.getByRole('button', { name: 'Vollbild' })).toBeHidden();
+
+  await page.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await expect(page.locator('#event-kind')).toHaveText('Radrennen');
+
+  await page.getByRole('button', { name: 'Vollbild', exact: true }).click();
+  await expect(page.locator('#bib')).toBeHidden();
+  await expect(page.locator('#sheet')).toBeHidden();
+  const exit = page.getByRole('button', { name: 'Vollbild beenden' });
+  await expect(exit).toHaveAttribute('aria-pressed', 'true');
+  await expectOnScreen(exit, 24);
+  await expectOnScreen(page.locator('.maplibregl-ctrl-geolocate'), 24);
+  await expect(page.getByTestId('version')).toBeVisible();
+
+  // Strecke ist jetzt über die ganze Fläche sichtbar
+  const vp = page.viewportSize()!;
+  await expect
+    .poll(async () => countColorPixels(page, RAD, { x: 0, y: 0, width: vp.width, height: vp.height }), { timeout: 10_000 })
+    .toBeGreaterThan(300);
+
+  await exit.click();
+  await expect(page.locator('#bib')).toBeVisible();
+  await expectOnScreen(page.getByRole('button', { name: 'Link teilen' }), 40);
+  await expect(page.getByRole('button', { name: 'Vollbild', exact: true })).toHaveAttribute('aria-pressed', 'false');
 });
