@@ -97,7 +97,10 @@ test('Rad-Plan ab meinem Standort: Stopps mit Zeiten aller Athleten, Wege ohne S
   let px = 0;
   try {
     await expect
-      .poll(async () => (px = await countColorPixels(page, PLAN_COLOR, { x: 0, y: 80, width: vp.width, height: vp.height - 120 }, 45)), { timeout: 10_000 })
+      .poll(async () => (px = await countColorPixels(page, PLAN_COLOR, { x: 0, y: 80, width: vp.width, height: vp.height - 120 }, 45)), {
+        // Unter Volllast (CI, Software-Grafik) kann das Zeichnen > 10 s dauern; Diagnose zeigte: die Wege kommen
+        timeout: 25_000,
+      })
       .toBeGreaterThan(120);
   } catch {
     const state = (await page.evaluate(() => (window as unknown as { __supbuddyMap?: () => unknown }).__supbuddyMap?.())) as {
