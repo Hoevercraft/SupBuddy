@@ -167,6 +167,23 @@ function renderSheet(): void {
   `;
 }
 
+/** Frei sichtbarer Kartenbereich: oben die Startnummer, unten das Panel (außer im Vollbild). */
+function visiblePadding() {
+  const vh = window.innerHeight;
+  const bib = document.querySelector('#bib');
+  const sheet = document.querySelector('#sheet');
+  const bibBox = bib && !mapOnly && !(bib as HTMLElement).hidden ? bib.getBoundingClientRect() : null;
+  const sheetBox = sheet && !mapOnly ? sheet.getBoundingClientRect() : null;
+  // Panel unten über die volle Breite → unten abziehen; auf breiten Bildschirmen liegt es links
+  const sheetBottom = sheetBox && sheetBox.width > window.innerWidth * 0.9;
+  return {
+    top: (bibBox ? bibBox.bottom : 0) + 30,
+    bottom: (sheetBottom ? vh - sheetBox!.top : 0) + 30,
+    left: (sheetBox && !sheetBottom ? sheetBox.right : 0) + 44,
+    right: 70, // Kartenknöpfe rechts
+  };
+}
+
 /** Vollbild-Karte: Startnummer und Panel ausblenden. */
 function setMapOnly(on: boolean): void {
   mapOnly = on && !!event;
@@ -379,7 +396,16 @@ async function start(): Promise<void> {
         renderSheet();
       },
       onToggleMapOnly: () => setMapOnly(!mapOnly),
+      getPadding: visiblePadding,
     });
+    // Beim Standort-Fix sollen auch die Athleten (bzw. die Strecke) ins Bild
+    courseMap.focusPoints = (me) => {
+      if (!event) return [];
+      const moving = athletesNow(event, Date.now()).flatMap(({ plan }) => (plan.state === 'unterwegs' ? [plan.point] : []));
+      if (moving.length) return moving;
+      const n = nearestOnCourse(event, me);
+      return n ? [n.point] : [];
+    };
   } catch (e) {
     console.warn('Karte nicht verfügbar:', e);
     $('#map').innerHTML = '<p class="map-error">Die Karte kann auf diesem Gerät nicht angezeigt werden.</p>';
