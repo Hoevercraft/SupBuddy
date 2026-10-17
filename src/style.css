@@ -637,3 +637,4 @@ body:not(.has-event) .ctrl-sections { display: none; }
 .link-btn { border: 0; background: none; padding: 0 2px; color: var(--ink-soft); text-decoration: underline; font: inherit; cursor: pointer; }
 .sight-btn { margin-top: 6px; }
 .sight-hint { margin-top: 10px; }
+.status-warn { margin: 6px 0 0; font-size: 13px; color: var(--danger); font-weight: 600; }

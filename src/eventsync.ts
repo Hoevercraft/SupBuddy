@@ -147,7 +147,14 @@ export class EventSync {
     if (!ev.id) return Promise.resolve();
     markShared(ev.id);
     this.event = ev;
-    return this.run(() => this.pull());
+    const id = ev.id;
+    return this.run(async () => {
+      // Ausgangsstand merken (der Link bzw. der Stand beim Teilen). Spätere eigene Änderungen
+      // werden dagegen verglichen – so gehen sie auch nicht verloren, wenn der Server erst
+      // später erreichbar ist oder inzwischen jemand anders etwas geändert hat.
+      if (!loadState(id)) saveState(id, { version: 0, base: canonical(ev), baseToken: await encodeEvent(ev) });
+      await this.pull();
+    });
   }
 
   /** Stand vom Server holen (regelmäßig aufrufen). */
@@ -188,8 +195,11 @@ export class EventSync {
       if (localChanged && st) {
         const base: RaceEvent = { ...(await decodeEvent(st.baseToken)), id: ev.id };
         next = merge3(base, current, remoteEv);
+      } else if (!st) {
+        // Kein Ausgangsstand bekannt (ältere Version): Server gilt, aber nur hier
+        // eingetragene Athleten gehen nicht verloren
+        next = keepLocalOnly(remoteEv, current);
       }
-      // Erstes Mal (z. B. Link geöffnet, der Link kann älter sein): der Server ist die gemeinsame Wahrheit
       saveState(ev.id, { version: remote.version, base: remoteCanon, baseToken: remote.data });
       if (canonical(next) !== canonical(current)) await this.apply(next);
       if (canonical(next) !== remoteCanon) await this.push(retry);
@@ -204,7 +214,8 @@ export class EventSync {
     if (!ev?.id || !isShared(ev.id)) return;
     const st = loadState(ev.id);
     const canon = canonical(ev);
-    if (st && st.base === canon) return;
+    // Nichts Neues – außer das Event ist noch gar nicht auf dem Server (Version 0)
+    if (st && st.version > 0 && st.base === canon) return;
     const token = await encodeEvent(ev);
     try {
       const version = await putEvent(ev.id, token, st?.version ?? 0);
@@ -220,4 +231,11 @@ export class EventSync {
       else throw e;
     }
   }
+}
+
+/** Athleten, die es nur lokal gibt, an den Server-Stand anhängen. */
+export function keepLocalOnly(remote: RaceEvent, local: RaceEvent): RaceEvent {
+  const ids = new Set(remote.athletes.map((a) => a.id));
+  const extra = local.athletes.filter((a) => a.id && !ids.has(a.id));
+  return extra.length ? { ...remote, athletes: [...remote.athletes, ...extra] } : remote;
 }

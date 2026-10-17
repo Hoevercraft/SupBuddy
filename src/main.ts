@@ -49,6 +49,7 @@ const sightings = new SightingStore(onSightingsChange);
 let lastOffsets = new Map<string, number>();
 /** Ganzes Event live für alle mit dem Link (Stufe 5b) */
 const eventSync = new EventSync(applyRemoteEvent, () => {
+  renderStatus();
   if (section === 'strecke') renderSheetUnlessTyping();
 });
 /** Panel wurde für die Punkt-Karte eingeklappt (kleiner Bildschirm) → beim Schließen wieder zeigen */
@@ -173,6 +174,10 @@ function renderStatus(): void {
         )
         .join('')}${items.length > 3 ? `<li class="status-more">+${items.length - 3} weitere</li>` : ''}</ul>`
     : '<span class="status-empty">Noch keine Athleten – hier tippen zum Eintragen</span>';
+  // Nicht übersehen: Änderungen kommen gerade nicht bei den anderen an
+  if (eventSync.state === 'offline' || sightings.state === 'offline') {
+    bar.insertAdjacentHTML('beforeend', '<p class="status-warn" data-testid="sync-warn">⚠ Nicht synchron – Änderungen werden nachgereicht, sobald es wieder geht.</p>');
+  }
 }
 
 /** Bereich öffnen/schließen (null = alle zu). */
