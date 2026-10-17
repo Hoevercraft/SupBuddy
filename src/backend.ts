@@ -166,25 +166,37 @@ export async function addSighting(eventId: string, athleteId: string, along: num
 export const deleteSighting = (id: string) => rpc<boolean>('delete_sighting', { p_id: id });
 
 export interface RemoteEvent {
-  /** Event im Link-Format (komprimiert, Base64url) */
-  data: string;
+  /** Event im Link-Format (komprimiert, Base64url); null wenn abgelaufen */
+  data: string | null;
   version: number;
+  /** Wann der Server das Event löscht (ms) */
+  expiresAt: number;
+  expired: boolean;
 }
 
 /** Geteiltes Event holen; null = auf dem Server (noch) nicht vorhanden. */
 export async function fetchEvent(eventId: string): Promise<RemoteEvent | null> {
-  const rows = await rpc<RemoteEvent[]>('get_event', { p_event: eventId });
-  return rows?.[0] ? { data: rows[0].data, version: rows[0].version } : null;
+  const rows = await rpc<{ data: string | null; version: number; expires_at: string; expired: boolean }[]>('get_event', { p_event: eventId });
+  const r = rows?.[0];
+  return r ? { data: r.data, version: r.version, expiresAt: Date.parse(r.expires_at), expired: !!r.expired } : null;
 }
 
 export class ConflictError extends Error {}
+/** Event ist abgelaufen (Daten gelöscht, wird nicht mehr geteilt). */
+export class ExpiredError extends Error {}
 
-/** Event speichern; baseVersion = Version, auf der die Änderung beruht (0 = neu). */
-export async function putEvent(eventId: string, data: string, baseVersion: number): Promise<number> {
+export const isExpiredError = (e: unknown) => e instanceof BackendError && (e.status === 410 || /Abgelaufen/.test(e.message));
+
+/**
+ * Event speichern; baseVersion = Version, auf der die Änderung beruht (0 = neu).
+ * raceDate bestimmt, wann der Server das Event löscht (2 Tage nach dem Renntag).
+ */
+export async function putEvent(eventId: string, data: string, baseVersion: number, raceDate: string | null): Promise<number> {
   try {
-    return await rpc<number>('put_event', { p_event: eventId, p_data: data, p_base_version: baseVersion });
+    return await rpc<number>('put_event', { p_event: eventId, p_data: data, p_base_version: baseVersion, p_race_date: raceDate });
   } catch (e) {
     if (e instanceof BackendError && /Konflikt/.test(e.message)) throw new ConflictError('Konflikt');
+    if (isExpiredError(e)) throw new ExpiredError('Abgelaufen');
     throw e;
   }
 }

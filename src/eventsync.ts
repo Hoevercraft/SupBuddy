@@ -1,4 +1,4 @@
-import { BackendError, ConflictError, fetchEvent, putEvent } from './backend';
+import { BackendError, ConflictError, ExpiredError, fetchEvent, putEvent } from './backend';
 import type { Athlete, RaceEvent } from './model';
 import { decodeEvent, encodeEvent, eventToWire } from './share';
 
@@ -105,10 +105,28 @@ function markShared(id: string): void {
   }
 }
 
-export type EventSyncState = 'ok' | 'offline' | 'off';
+export type EventSyncState = 'ok' | 'offline' | 'off' | 'expired';
+
+const EXPIRED = (id: string) => `supbuddy:expired:${id}`;
+export function isExpired(id: string): boolean {
+  try {
+    return localStorage.getItem(EXPIRED(id)) === '1';
+  } catch {
+    return false;
+  }
+}
+function markExpired(id: string): void {
+  try {
+    localStorage.setItem(EXPIRED(id), '1');
+  } catch {
+    // egal
+  }
+}
 
 export class EventSync {
   state: EventSyncState = 'off';
+  /** Bis wann der Server das Event aufbewahrt (ms), sobald bekannt */
+  expiresAt: number | null = null;
   private event: RaceEvent | null = null;
   private chain: Promise<void> = Promise.resolve();
   private timer: number | undefined;
@@ -131,9 +149,14 @@ export class EventSync {
 
   /** Aktuelles Event (nach jeder Änderung aufrufen). local = vom Nutzer geändert → hochladen. */
   update(ev: RaceEvent | null, local: boolean): void {
+    if (ev?.id !== this.event?.id) this.expiresAt = null;
     this.event = ev;
     if (!ev?.id || !isShared(ev.id)) {
       this.setState('off');
+      return;
+    }
+    if (isExpired(ev.id)) {
+      this.setState('expired');
       return;
     }
     if (local) {
@@ -159,7 +182,7 @@ export class EventSync {
 
   /** Stand vom Server holen (regelmäßig aufrufen). */
   refresh(): Promise<void> {
-    if (!this.event?.id || !isShared(this.event.id)) return Promise.resolve();
+    if (!this.event?.id || !isShared(this.event.id) || isExpired(this.event.id)) return Promise.resolve();
     return this.run(() => this.pull());
   }
 
@@ -175,13 +198,25 @@ export class EventSync {
     try {
       const remote = await fetchEvent(ev.id);
       if (this.event?.id !== ev.id) return;
+      if (remote?.expired || !remote?.data) {
+        if (remote) {
+          // Abgelaufen: lokal bleibt alles, geteilt wird nicht mehr
+          markExpired(ev.id);
+          this.setState('expired');
+          return;
+        }
+      }
+      if (remote && remote.expiresAt !== this.expiresAt) {
+        this.expiresAt = remote.expiresAt;
+        this.onState();
+      }
       const st = loadState(ev.id);
       if (!remote) {
         // Noch nicht auf dem Server → eigenen Stand hochladen
         await this.push(retry);
         return;
       }
-      const remoteEv: RaceEvent = { ...(await decodeEvent(remote.data)), id: ev.id };
+      const remoteEv: RaceEvent = { ...(await decodeEvent(remote.data!)), id: ev.id };
       const current = this.event!;
       const remoteCanon = canonical(remoteEv);
       if (st && st.version === remote.version) {
@@ -200,7 +235,7 @@ export class EventSync {
         // eingetragene Athleten gehen nicht verloren
         next = keepLocalOnly(remoteEv, current);
       }
-      saveState(ev.id, { version: remote.version, base: remoteCanon, baseToken: remote.data });
+      saveState(ev.id, { version: remote.version, base: remoteCanon, baseToken: remote.data! });
       if (canonical(next) !== canonical(current)) await this.apply(next);
       if (canonical(next) !== remoteCanon) await this.push(retry);
       this.setState('ok');
@@ -211,17 +246,22 @@ export class EventSync {
 
   private async push(retry = 2): Promise<void> {
     const ev = this.event;
-    if (!ev?.id || !isShared(ev.id)) return;
+    if (!ev?.id || !isShared(ev.id) || isExpired(ev.id)) return;
     const st = loadState(ev.id);
     const canon = canonical(ev);
     // Nichts Neues – außer das Event ist noch gar nicht auf dem Server (Version 0)
     if (st && st.version > 0 && st.base === canon) return;
     const token = await encodeEvent(ev);
     try {
-      const version = await putEvent(ev.id, token, st?.version ?? 0);
+      const version = await putEvent(ev.id, token, st?.version ?? 0, ev.date);
       saveState(ev.id, { version, base: canon, baseToken: token });
       this.setState('ok');
     } catch (e) {
+      if (e instanceof ExpiredError) {
+        markExpired(ev.id);
+        this.setState('expired');
+        return;
+      }
       if (e instanceof ConflictError && retry > 0) {
         // Jemand anders war schneller → holen, zusammenführen, nochmal
         await this.pull(retry - 1);

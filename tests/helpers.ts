@@ -245,7 +245,7 @@ export interface BackendStore {
   /** Anonyme Anmeldung im Supabase-Projekt aus (wie vor dem Einschalten) */
   signupDisabled?: boolean;
   /** Geteilte Events (Stufe 5b) */
-  events: Map<string, { data: string; version: number }>;
+  events: Map<string, { data: string; version: number; raceDate?: string | null; expired?: boolean }>;
   /** Event-Funktionen fehlen auf dem Server (SQL noch nicht ausgeführt) */
   eventsMissing?: boolean;
 }
@@ -286,8 +286,10 @@ export async function mockBackend(page: Page, store: BackendStore = newBackendSt
     const out = (r: BackendStore['rows'][number]) => ({ id: r.id, athlete_id: r.athlete_id, along_m: r.along_m, seen_at: r.seen_at, mine: r.created_by === user });
     switch (url.pathname) {
       case '/rest/v1/rpc/get_sightings':
+        if (store.events.get(body.p_event)?.expired) return json(200, []);
         return json(200, store.rows.filter((r) => r.event_id === body.p_event).map(out));
       case '/rest/v1/rpc/add_sighting': {
+        if (store.events.get(body.p_event)?.expired) return json(410, { code: 'PT410', message: 'Abgelaufen' });
         const r = { id: `s-${store.rows.length + 1}-${Date.now()}`, event_id: body.p_event, athlete_id: body.p_athlete, along_m: body.p_along, seen_at: body.p_seen, created_by: user };
         store.rows.push(r);
         return json(200, [out(r)]);
@@ -300,17 +302,19 @@ export async function mockBackend(page: Page, store: BackendStore = newBackendSt
     switch (url.pathname) {
       case '/rest/v1/rpc/get_event': {
         const e = store.events.get(body.p_event);
-        return json(200, e ? [{ data: e.data, version: e.version, updated_at: new Date().toISOString() }] : []);
+        const expires = e?.raceDate ? new Date(Date.parse(`${e.raceDate}T00:00:00+02:00`) + 3 * 86_400_000) : new Date(Date.now() + 7 * 86_400_000);
+        return json(200, e ? [{ data: e.expired ? null : e.data, version: e.version, expires_at: expires.toISOString(), expired: !!e.expired }] : []);
       }
       case '/rest/v1/rpc/put_event': {
         if (!/^[A-Za-z0-9_-]+$/.test(body.p_data ?? '')) return json(400, { code: '22023', message: 'Ungültige Daten' });
         const e = store.events.get(body.p_event);
         if (!e) {
-          store.events.set(body.p_event, { data: body.p_data, version: 1 });
+          store.events.set(body.p_event, { data: body.p_data, version: 1, raceDate: body.p_race_date });
           return json(200, 1);
         }
+        if (e.expired) return json(410, { code: 'PT410', message: 'Abgelaufen' });
         if (e.version !== body.p_base_version) return json(409, { code: 'PT409', message: 'Konflikt' });
-        store.events.set(body.p_event, { data: body.p_data, version: e.version + 1 });
+        store.events.set(body.p_event, { data: body.p_data, version: e.version + 1, raceDate: body.p_race_date });
         return json(200, e.version + 1);
       }
       case '/rest/v1/rpc/delete_sighting': {

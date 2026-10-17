@@ -638,3 +638,4 @@ body:not(.has-event) .ctrl-sections { display: none; }
 .sight-btn { margin-top: 6px; }
 .sight-hint { margin-top: 10px; }
 .status-warn { margin: 6px 0 0; font-size: 13px; color: var(--danger); font-weight: 600; }
+.status-note { margin: 6px 0 0; font-size: 13px; color: var(--ink-soft); }
