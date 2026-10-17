@@ -175,7 +175,9 @@ function renderStatus(): void {
         .join('')}${items.length > 3 ? `<li class="status-more">+${items.length - 3} weitere</li>` : ''}</ul>`
     : '<span class="status-empty">Noch keine Athleten – hier tippen zum Eintragen</span>';
   // Nicht übersehen: Änderungen kommen gerade nicht bei den anderen an
-  if (eventSync.state === 'offline' || sightings.state === 'offline') {
+  if (eventSync.state === 'expired') {
+    bar.insertAdjacentHTML('beforeend', '<p class="status-note" data-testid="expired-note">Event abgelaufen – Änderungen werden nicht mehr geteilt.</p>');
+  } else if (eventSync.state === 'offline' || sightings.state === 'offline') {
     bar.insertAdjacentHTML('beforeend', '<p class="status-warn" data-testid="sync-warn">⚠ Nicht synchron – Änderungen werden nachgereicht, sobald es wieder geht.</p>');
   }
 }
@@ -242,13 +244,7 @@ function renderSheet(): void {
              <button class="btn btn-primary" id="btn-share" type="button">Link teilen</button>
              <button class="btn" id="btn-load" type="button">Etappe hinzufügen</button>
            </div>
-           <p class="hint live-hint" data-testid="live-hint">${
-             event.id && isShared(event.id)
-               ? eventSync.state === 'offline'
-                 ? '<strong>Gerade offline:</strong> Änderungen werden übertragen, sobald wieder Netz da ist.'
-                 : 'Live geteilt: Änderungen an Strecke, Athleten und Renntag sehen alle, die euren Link haben.'
-               : 'Mit „Link teilen“ seht ihr ab dann alle denselben Stand – Änderungen kommen bei allen an.'
-           }</p>
+           <p class="hint live-hint" data-testid="live-hint">${liveHint()}</p>
            <button class="btn btn-quiet" id="btn-reset" type="button">Anderes Rennen laden</button>`;
   sheet.innerHTML = `
     <div class="section-head">
@@ -310,6 +306,21 @@ function render(fit = false): void {
   renderStatus();
   courseMap?.setEvent(event, fit);
   renderAthleteMarkers();
+}
+
+/** Hinweis im Bereich Strecke: geteilt? bis wann? */
+function liveHint(): string {
+  if (!event?.id || !isShared(event.id)) {
+    return 'Mit „Link teilen“ seht ihr ab dann alle denselben Stand – Änderungen kommen bei allen an.';
+  }
+  if (eventSync.state === 'expired') {
+    return '<strong>Abgelaufen:</strong> Der Server hat dieses Event gelöscht (2 Tage nach dem Renntag bzw. 7 Tage ohne Änderung). Auf diesem Handy bleibt alles, geteilt wird nichts mehr.';
+  }
+  if (eventSync.state === 'offline') return '<strong>Gerade offline:</strong> Änderungen werden übertragen, sobald wieder Netz da ist.';
+  const until = eventSync.expiresAt
+    ? ` bis ${new Date(eventSync.expiresAt - 1).toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' })} – danach löscht der Server die Daten (2 Tage nach dem Renntag, ohne Renntag 7 Tage nach der letzten Änderung)`
+    : '';
+  return `Live geteilt${until}. Änderungen an Strecke, Athleten und Renntag sehen alle, die euren Link haben.`;
 }
 
 /** Neuigkeiten (Antwort auf einen eigenen Tipp, Abgleich) gleich zeigen – außer jemand tippt gerade. */

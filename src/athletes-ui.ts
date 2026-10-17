@@ -172,9 +172,11 @@ function sightingHint(sv: SightingView, hasPosition: boolean): string {
       ? '„Jetzt hier“ geht, sobald du an der Strecke stehst (bis 150 m).'
       : 'Mit deinem Standort kannst du an der Strecke melden, wenn jemand vorbeikommt.';
   const sync =
-    sv.sync === 'offline'
-      ? ' <strong>Gerade offline:</strong> Sichtungen bleiben auf diesem Handy und werden nachgereicht.'
-      : ' Sichtungen sehen alle, die euren Link haben.';
+    sv.sync === 'expired'
+      ? ' <strong>Event abgelaufen:</strong> Sichtungen werden nicht mehr geteilt.'
+      : sv.sync === 'offline'
+        ? ' <strong>Gerade offline:</strong> Sichtungen bleiben auf diesem Handy und werden nachgereicht.'
+        : ' Sichtungen sehen alle, die euren Link haben.';
   return `<p class="hint sight-hint" data-testid="sight-hint">${how}${sync}</p>`;
 }
 

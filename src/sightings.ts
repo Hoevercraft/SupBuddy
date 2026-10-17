@@ -1,4 +1,4 @@
-import { addSighting, BackendError, deleteSighting, fetchSightings, type RemoteSighting } from './backend';
+import { addSighting, BackendError, deleteSighting, fetchSightings, isExpiredError, type RemoteSighting } from './backend';
 import { legDistance } from './course';
 import { haversine } from './geo';
 import type { Athlete, Point, RaceEvent } from './model';
@@ -123,7 +123,7 @@ const fromRemote = (r: RemoteSighting): Sighting => ({
   mine: !!r.mine,
 });
 
-export type SyncState = 'ok' | 'offline' | 'idle';
+export type SyncState = 'ok' | 'offline' | 'idle' | 'expired';
 
 /** Sichtungen eines Events: lokal gespeichert, mit dem Server abgeglichen. */
 export class SightingStore {
@@ -146,6 +146,7 @@ export class SightingStore {
 
   /** Mit dem Server abgleichen: Wartende hochladen, dann alle holen. */
   refresh(): Promise<void> {
+    if (this.state === 'expired') return Promise.resolve();
     if (!this.busy) {
       this.busy = this.doRefresh().finally(() => (this.busy = null));
     }
@@ -167,6 +168,14 @@ export class SightingStore {
       this.list = [...remote, ...pending];
       this.state = 'ok';
     } catch (e) {
+      if (isExpiredError(e)) {
+        // Event abgelaufen: was hier ist, bleibt auf dem Gerät; geteilt wird nichts mehr
+        this.list = this.list.map((x) => ({ ...x, pending: false }));
+        this.state = 'expired';
+        save(ev, this.list);
+        this.onChange();
+        return;
+      }
       // Vom Server als ungültig abgelehnte Sichtung (z. B. älter als 2 Tage) nicht ewig wiederholen.
       // Alle anderen Fehler (offline, Anmeldung gesperrt, Überlast) → behalten und später erneut.
       if (e instanceof BackendError && e.status === 400 && /^Ungültige/.test(e.message)) {

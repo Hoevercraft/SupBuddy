@@ -254,3 +254,50 @@ test('Server erst später erreichbar (z. B. SQL noch nicht ausgeführt): Warnung
   await a.context().close();
   await b.context().close();
 });
+
+test('Ablauf: Server löscht 2 Tage nach dem Renntag – danach wird nichts mehr geteilt oder neu angelegt', async ({ browser }, info) => {
+  test.slow();
+  const store = newBackendStore();
+  const a = await device(browser, info, store);
+  await openApp(a);
+  await a.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await addAthlete(a, 'Jan'); // setzt den Renntag (heute = 23.8.)
+  await openSection(a, 'Strecke');
+  await a.getByRole('button', { name: 'Link teilen' }).click();
+  await expect(a.getByTestId('share-link')).toHaveValue(/#e=/);
+  const link = await a.getByTestId('share-link').inputValue();
+  await a.locator('#share-dialog').getByRole('button', { name: 'Schließen' }).click();
+  await expect.poll(() => store.events.size).toBe(1);
+  // Renntag geht an den Server (bestimmt das Löschen) und die App sagt, bis wann
+  const [id, entry] = [...store.events.entries()][0];
+  expect(entry.raceDate).toBe('2026-08-23');
+  await sync(a);
+  await expect(a.getByTestId('live-hint')).toContainText('Live geteilt bis 25.8.');
+
+  // Server hat das Event gelöscht (abgelaufen)
+  store.events.set(id, { ...entry, expired: true });
+  await sync(a);
+  await expect(a.getByTestId('live-hint')).toContainText('Abgelaufen');
+  await a.getByRole('button', { name: 'Strecke schließen' }).click();
+  await expect(a.getByTestId('expired-note')).toContainText('Event abgelaufen');
+  await expect(a.getByTestId('sync-warn')).toHaveCount(0);
+  // Lokal geht alles weiter, aber es wird nichts mehr hochgeladen
+  const before = store.events.get(id)!.version;
+  await addAthlete(a, 'Max');
+  await a.waitForTimeout(2000);
+  await sync(a);
+  await a.waitForTimeout(500);
+  expect(store.events.get(id)!.version).toBe(before);
+  await expect(names(a)).toHaveText(['Jan', 'Max']);
+
+  // Alter Link auf einem anderen Gerät: öffnet (Daten aus dem Link), legt das Event aber nicht neu an
+  const b = await device(browser, info, store);
+  await openApp(b, new URL(link).hash);
+  await openSection(b, 'Athleten');
+  await expect(names(b)).toHaveText(['Jan']);
+  await b.getByRole('button', { name: 'Athleten schließen' }).click();
+  await expect(b.getByTestId('expired-note')).toBeVisible();
+  expect(store.events.get(id)!.version).toBe(before);
+  await a.context().close();
+  await b.context().close();
+});
