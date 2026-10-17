@@ -1,7 +1,7 @@
 import { test, expect, type Browser, type Page, type TestInfo } from '@playwright/test';
-import { hashId, ID_RE, randomId, withIds } from '../src/ids';
+import { adoptIds, hashId, ID_RE, randomId, withIds } from '../src/ids';
 import type { Athlete, Point, RaceEvent } from '../src/model';
-import { eventFromWire, eventToWire } from '../src/share';
+import { decodeEvent, encodeEvent, eventFromWire, eventToWire } from '../src/share';
 import { setSightingOffsets, timeAtAlong, timeline } from '../src/schedule';
 import { alongsNear, latestByAthlete, offsetsFrom, sightingAlong, type Sighting } from '../src/sightings';
 import { fixture, mockBackend, newBackendStore, openApp, openSection, type BackendStore } from './helpers';
@@ -80,6 +80,20 @@ test.describe('Logik', () => {
   });
 });
 
+test('Kennungen aus dem letzten Link übernehmen: nur bei gleicher Strecke, Athleten über Name + Startzeit', () => {
+  const linked = outAndBack();
+  const saved: RaceEvent = { ...linked, id: 'h00000000001', athletes: [{ ...linked.athletes[0], id: undefined }, { ...linked.athletes[0], name: 'Max', id: 'a00000000002' }] };
+  const r = adoptIds(saved, linked);
+  expect(r.id).toBe('event-test-1');
+  expect(r.athletes[0].id).toBe('athlete-jan');
+  expect(r.athletes[1].id).toBe('a00000000002'); // Max steht nicht im Link → bleibt
+  // Andere Strecke → nichts übernehmen
+  const other = { ...linked, legs: [{ ...linked.legs[0], points: linked.legs[0].points.slice(0, 50) }] };
+  expect(adoptIds(saved, other)).toBe(saved);
+  // Andere Startzeit → kein Treffer
+  expect(adoptIds({ ...saved, athletes: [{ ...saved.athletes[0], start: '11:00' }] }, linked).athletes[0].id).toBeUndefined();
+});
+
 // ---------------------------------------------------------------- Oberfläche (zwei Geräte)
 
 const NORTH = { latitude: 53.3003, longitude: 10.4117 }; // an der Strecke, km 9,4
@@ -133,6 +147,8 @@ test('„Jan jetzt hier“: Zeitplan springt auf die echte Zeit, andere Geräte 
   // Leiste unten zeigt die korrigierte Position
   await a.getByRole('button', { name: 'Athleten schließen' }).click();
   await expect(a.getByTestId('statusbar')).toContainText('km 9,4');
+  // … und dass die Zeit auf einer Sichtung beruht
+  await expect(a.getByTestId('statusbar')).toContainText('gesichtet 10:10');
 
   // Link teilen → zweites Gerät, zwei Minuten später
   await openSection(a, 'Strecke');
@@ -235,4 +251,63 @@ test('Ohne Athleten wird der Dienst gar nicht angesprochen', async ({ page }) =>
   await expect(page.getByTestId('section-title')).toHaveText('Athleten');
   await page.waitForTimeout(500);
   expect(store.calls).toEqual([]);
+});
+
+test('Neue App-Version liest den letzten Link noch einmal: Sichtung passt wieder, auch wenn eine alte Version die Kennungen verloren hat', async ({ browser }, info) => {
+  test.slow();
+  const store = newBackendStore();
+  // Event wie im Link (mit Kennungen) und wie es eine alte App-Version gespeichert hätte (ohne)
+  const ev = withIds({ ...outAndBack(), id: 'shared-event-0001' });
+  const linkToken = await encodeEvent(ev);
+  const stripped = await encodeEvent({ ...ev, id: undefined, athletes: ev.athletes.map((a) => ({ ...a, id: undefined })) });
+  // Gegenprobe der Vorbereitung: der gespeicherte Stand hat wirklich keine Kennungen
+  expect((await decodeEvent(stripped)).athletes[0].id).toBeUndefined();
+  store.rows.push({ id: 's-1', event_id: 'shared-event-0001', athlete_id: 'athlete-jan', along_m: 3000, seen_at: new Date(T('10:08')).toISOString(), created_by: 'user-x' });
+
+  const ctx = await browser.newContext({ ...info.project.use, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  await mockBackend(page, store);
+  await page.clock.setFixedTime(new Date(T('10:10')));
+  // Stand nach dem Update: gespeichertes Event ohne Kennungen, Link zuletzt mit einer alten Version gelesen
+  await page.addInitScript(
+    ([saved, last]) => {
+      if (sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('supbuddy:event', saved);
+      localStorage.setItem('supbuddy:last-link', last);
+    },
+    [stripped, JSON.stringify({ token: linkToken, build: 'alte Version' })] as const,
+  );
+  await openApp(page);
+  await openSection(page, 'Athleten');
+  const row = page.getByTestId('athlete').filter({ hasText: 'Jan' });
+  await expect(row.getByTestId('athlete-sighting')).toHaveText('Gesichtet um 10:08 bei km 3,0');
+  await expect(row.getByTestId('athlete-status')).toHaveText(/^Nach Sichtung bei km /);
+  await ctx.close();
+});
+
+test('Gleiche App-Version: der letzte Link wird nicht erneut gelesen (lokale Änderungen bleiben)', async ({ browser }, info) => {
+  const store = newBackendStore();
+  const ev = withIds({ ...outAndBack(), id: 'shared-event-0002' });
+  const stripped = await encodeEvent({ ...ev, id: undefined, athletes: ev.athletes.map((a) => ({ ...a, id: undefined })) });
+  store.rows.push({ id: 's-2', event_id: 'shared-event-0002', athlete_id: 'athlete-jan', along_m: 3000, seen_at: new Date(T('10:08')).toISOString(), created_by: 'user-x' });
+  const ctx = await browser.newContext({ ...info.project.use, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  await mockBackend(page, store);
+  await page.clock.setFixedTime(new Date(T('10:10')));
+  // Build-Kennung der laufenden App auslesen und als „schon gelesen mit dieser Version“ hinterlegen
+  await openApp(page);
+  const build = (await page.getByTestId('version').textContent())!;
+  await page.evaluate(
+    ([saved, last]) => {
+      localStorage.setItem('supbuddy:event', saved);
+      localStorage.setItem('supbuddy:last-link', last);
+    },
+    [stripped, JSON.stringify({ token: await encodeEvent(ev), build })] as const,
+  );
+  await page.reload();
+  await page.locator('body[data-ready="true"]').waitFor();
+  await openSection(page, 'Athleten');
+  await expect(page.getByTestId('athlete').filter({ hasText: 'Jan' }).getByTestId('athlete-sighting')).toHaveCount(0);
+  await ctx.close();
 });

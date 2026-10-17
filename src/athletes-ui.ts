@@ -72,7 +72,13 @@ function hereText(ev: RaceEvent, athlete: Athlete, position: Point, now: number,
 }
 
 /** Kurzstatus für die Leiste unten: „km 12,3 · bei dir in 20 min“. */
-export function shortStatus(ev: RaceEvent, athlete: Athlete, plan: PlanState, position: Point | null, now: number): string {
+export function shortStatus(ev: RaceEvent, athlete: Athlete, plan: PlanState, position: Point | null, now: number, seenAt?: number): string {
+  const s = shortStatusPlain(ev, athlete, plan, position, now);
+  // Woher die Zeit kommt: aus einer Sichtung oder nur aus dem Plan
+  return seenAt === undefined ? s : `${s} · gesichtet ${clock(seenAt)}`;
+}
+
+function shortStatusPlain(ev: RaceEvent, athlete: Athlete, plan: PlanState, position: Point | null, now: number): string {
   const nb = (x: string) => x.replace(/ /g, '\u00a0');
   let here = '';
   if (position && plan.state !== 'im-ziel') {
