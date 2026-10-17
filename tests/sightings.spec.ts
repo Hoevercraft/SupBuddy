@@ -205,6 +205,29 @@ test('Offline: Sichtung wirkt sofort auf dem Gerät und wird nachgereicht', asyn
   await a.context().close();
 });
 
+test('Anonyme Anmeldung im Projekt aus: Sichtung geht nicht verloren, sondern wird nachgereicht', async ({ browser }, info) => {
+  test.slow();
+  const store = newBackendStore();
+  store.signupDisabled = true;
+  const a = await device(browser, info, store, '10:10');
+  await openApp(a);
+  await a.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await addJan(a);
+  await a.getByRole('button', { name: 'Standort anzeigen' }).click();
+  await expect(a.getByTestId('user-dot')).toHaveCount(1);
+  await a.getByRole('button', { name: 'Jan jetzt hier' }).click();
+  const row = a.getByTestId('athlete').filter({ hasText: 'Jan' });
+  await expect(a.getByTestId('sight-hint')).toContainText('Gerade offline');
+  await reopenAthletes(a);
+  await expect(row.getByTestId('athlete-sighting')).toContainText('wird übertragen');
+  expect(store.rows).toHaveLength(0);
+  store.signupDisabled = false;
+  await reopenAthletes(a);
+  await expect.poll(() => store.rows.length).toBe(1);
+  await expect(row.getByTestId('athlete-sighting')).not.toContainText('wird übertragen');
+  await a.context().close();
+});
+
 test('Ohne Athleten wird der Dienst gar nicht angesprochen', async ({ page }) => {
   const store = await mockBackend(page);
   await openApp(page);

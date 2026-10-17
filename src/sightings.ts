@@ -167,8 +167,9 @@ export class SightingStore {
       this.list = [...remote, ...pending];
       this.state = 'ok';
     } catch (e) {
-      // Ungültige Daten (z. B. zu alte Sichtung) nicht ewig wiederholen
-      if (e instanceof BackendError && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429) {
+      // Vom Server als ungültig abgelehnte Sichtung (z. B. älter als 2 Tage) nicht ewig wiederholen.
+      // Alle anderen Fehler (offline, Anmeldung gesperrt, Überlast) → behalten und später erneut.
+      if (e instanceof BackendError && e.status === 400 && /^Ungültige/.test(e.message)) {
         this.list = this.list.filter((x) => !x.pending);
       }
       this.state = 'offline';

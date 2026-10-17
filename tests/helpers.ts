@@ -242,6 +242,8 @@ export interface BackendStore {
   status: number;
   users: number;
   calls: string[];
+  /** Anonyme Anmeldung im Supabase-Projekt aus (wie vor dem Einschalten) */
+  signupDisabled?: boolean;
 }
 
 export const newBackendStore = (): BackendStore => ({ rows: [], status: 200, users: 0, calls: [] });
@@ -267,6 +269,9 @@ export async function mockBackend(page: Page, store: BackendStore = newBackendSt
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' } });
     if (store.status !== 200) return json(store.status, { message: 'down' });
     if (!req.headers()['apikey']?.startsWith('sb_publishable_')) return json(401, { message: 'apikey fehlt' });
+    if (url.pathname === '/auth/v1/signup' && store.signupDisabled) {
+      return json(422, { code: 422, error_code: 'anonymous_provider_disabled', msg: 'Anonymous sign-ins are disabled' });
+    }
     if (url.pathname === '/auth/v1/signup' || url.pathname === '/auth/v1/token') {
       const n = ++store.users;
       return json(200, { access_token: `user-${n}`, refresh_token: `r-${n}`, expires_in: 3600 });
