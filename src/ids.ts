@@ -32,14 +32,20 @@ export function hashId(text: string, prefix: string): string {
   return `${prefix}${n.toString(36).padStart(11, '0')}`;
 }
 
+/** Fingerabdruck der Strecke (Etappen, Punktzahl, Anfang/Ende). */
+export function courseKey(ev: RaceEvent): string {
+  return ev.legs
+    .map((l) => {
+      const a = l.points[0];
+      const b = l.points[l.points.length - 1];
+      return `${l.points.length}:${a?.lat.toFixed(5)},${a?.lng.toFixed(5)}:${b?.lat.toFixed(5)},${b?.lng.toFixed(5)}`;
+    })
+    .join('|');
+}
+
 /** Fehlende Kennungen ergänzen (aus dem Inhalt berechnet, damit alle Geräte dieselben bekommen). */
 export function withIds(ev: RaceEvent): RaceEvent {
-  const shape = ev.legs.map((l) => {
-    const a = l.points[0];
-    const b = l.points[l.points.length - 1];
-    return `${l.points.length}:${a?.lat.toFixed(5)},${a?.lng.toFixed(5)}:${b?.lat.toFixed(5)},${b?.lng.toFixed(5)}`;
-  });
-  const id = ev.id && ID_RE.test(ev.id) ? ev.id : hashId(`${ev.name}|${ev.date ?? ''}|${shape.join('|')}`, 'h');
+  const id = ev.id && ID_RE.test(ev.id) ? ev.id : hashId(`${ev.name}|${ev.date ?? ''}|${courseKey(ev)}`, 'h');
   let changed = id !== ev.id;
   const athletes = ev.athletes.map((a, i) => {
     if (a.id && ID_RE.test(a.id)) return a;
@@ -47,4 +53,24 @@ export function withIds(ev: RaceEvent): RaceEvent {
     return { ...a, id: hashId(`${i}|${a.name}|${a.start}`, 'a') };
   });
   return changed ? { ...ev, id, athletes } : ev;
+}
+
+/**
+ * Kennungen aus dem zuletzt geöffneten Link übernehmen (gleiche Strecke vorausgesetzt).
+ * Hilft, wenn eine ältere App-Version den Link ohne Kennungen gespeichert hat und erst danach
+ * die neue Version geladen wurde. Athleten werden über Name + Startzeit zugeordnet;
+ * sonst bleibt alles, wie es lokal ist.
+ */
+export function adoptIds(saved: RaceEvent, linked: RaceEvent): RaceEvent {
+  if (courseKey(saved) !== courseKey(linked)) return saved;
+  const used = new Set<number>();
+  const athletes = saved.athletes.map((a) => {
+    const j = linked.athletes.findIndex((l, k) => !used.has(k) && l.name === a.name && l.start === a.start && !!l.id);
+    if (j < 0) return a;
+    used.add(j);
+    return a.id === linked.athletes[j].id ? a : { ...a, id: linked.athletes[j].id };
+  });
+  const id = linked.id ?? saved.id;
+  const changed = id !== saved.id || athletes.some((a, i) => a !== saved.athletes[i]);
+  return changed ? { ...saved, id, athletes } : saved;
 }

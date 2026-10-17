@@ -18,8 +18,8 @@ import { formatDistance, formatKm, haversine } from './geo';
 import { GpxError, parseGpx } from './gpx';
 import { DISCIPLINES, eventKind, type Discipline, type Point, type RaceEvent } from './model';
 import { decodeEvent, normalizeLeg, shareUrl, tokenFromHash } from './share';
-import { loadEvent, saveEvent } from './store';
-import { randomId, withIds } from './ids';
+import { loadEvent, loadLastLink, saveEvent, saveLastLink } from './store';
+import { adoptIds, randomId, withIds } from './ids';
 import { setSightingOffsets } from './schedule';
 import { alongsNear, latestByAthlete, offsetsFrom, sightingAlong, SightingStore } from './sightings';
 
@@ -157,13 +157,14 @@ function renderStatus(): void {
   if (!event) return;
   const now = Date.now();
   const items = athletesNow(event, now);
+  const seen = latestByAthlete(sightings.list);
   bar.setAttribute('aria-label', 'Athleten öffnen');
   bar.innerHTML = items.length
     ? `<ul class="status-list">${items
         .slice(0, 3)
         .map(
           ({ athlete, plan: p }) =>
-            `<li style="--athlete-color:${athlete.color}"><span class="status-dot" aria-hidden="true">${esc(initials(athlete.name))}</span><span class="status-name">${esc(athlete.name)}</span> <span class="status-text">${esc(shortStatus(event!, athlete, p, position, now))}</span></li>`,
+            `<li style="--athlete-color:${athlete.color}"><span class="status-dot" aria-hidden="true">${esc(initials(athlete.name))}</span><span class="status-name">${esc(athlete.name)}</span> <span class="status-text">${esc(shortStatus(event!, athlete, p, position, now, athlete.id ? seen.get(athlete.id)?.seenAt : undefined))}</span></li>`,
         )
         .join('')}${items.length > 3 ? `<li class="status-more">+${items.length - 3} weitere</li>` : ''}</ul>`
     : '<span class="status-empty">Noch keine Athleten – hier tippen zum Eintragen</span>';
@@ -717,6 +718,7 @@ async function loadFromHash(): Promise<boolean> {
   if (!token) return false;
   try {
     await setEvent(await decodeEvent(token));
+    saveLastLink(token, BUILD_LABEL);
     toast('Strecke aus dem Link geladen.');
     return true;
   } catch {
@@ -784,6 +786,17 @@ async function start(): Promise<void> {
   if (!(await loadFromHash())) {
     const loaded = await loadEvent();
     event = loaded && loaded.legs.length ? withIds(loaded) : null;
+    // Neue App-Version: den zuletzt geöffneten Link noch einmal lesen (ältere Versionen
+    // kannten evtl. noch nicht alles, was drinsteht – z. B. Kennungen für Sichtungen)
+    const last = loadLastLink();
+    if (event && last && last.build !== BUILD_LABEL) {
+      try {
+        event = adoptIds(event, await decodeEvent(last.token));
+      } catch {
+        // Link nicht lesbar → so lassen
+      }
+      saveLastLink(last.token, BUILD_LABEL);
+    }
     if (event !== loaded) await saveEvent(event);
     sightings.setEvent(event?.athletes.length ? (event.id ?? null) : null);
     applyOffsets();
