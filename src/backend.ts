@@ -164,3 +164,27 @@ export async function addSighting(eventId: string, athleteId: string, along: num
 }
 
 export const deleteSighting = (id: string) => rpc<boolean>('delete_sighting', { p_id: id });
+
+export interface RemoteEvent {
+  /** Event im Link-Format (komprimiert, Base64url) */
+  data: string;
+  version: number;
+}
+
+/** Geteiltes Event holen; null = auf dem Server (noch) nicht vorhanden. */
+export async function fetchEvent(eventId: string): Promise<RemoteEvent | null> {
+  const rows = await rpc<RemoteEvent[]>('get_event', { p_event: eventId });
+  return rows?.[0] ? { data: rows[0].data, version: rows[0].version } : null;
+}
+
+export class ConflictError extends Error {}
+
+/** Event speichern; baseVersion = Version, auf der die Änderung beruht (0 = neu). */
+export async function putEvent(eventId: string, data: string, baseVersion: number): Promise<number> {
+  try {
+    return await rpc<number>('put_event', { p_event: eventId, p_data: data, p_base_version: baseVersion });
+  } catch (e) {
+    if (e instanceof BackendError && /Konflikt/.test(e.message)) throw new ConflictError('Konflikt');
+    throw e;
+  }
+}

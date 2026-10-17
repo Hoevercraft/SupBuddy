@@ -244,9 +244,11 @@ export interface BackendStore {
   calls: string[];
   /** Anonyme Anmeldung im Supabase-Projekt aus (wie vor dem Einschalten) */
   signupDisabled?: boolean;
+  /** Geteilte Events (Stufe 5b) */
+  events: Map<string, { data: string; version: number }>;
 }
 
-export const newBackendStore = (): BackendStore => ({ rows: [], status: 200, users: 0, calls: [] });
+export const newBackendStore = (): BackendStore => ({ rows: [], status: 200, users: 0, calls: [], events: new Map() });
 
 const backendMocked = new WeakSet<Page>();
 
@@ -287,6 +289,21 @@ export async function mockBackend(page: Page, store: BackendStore = newBackendSt
         const r = { id: `s-${store.rows.length + 1}-${Date.now()}`, event_id: body.p_event, athlete_id: body.p_athlete, along_m: body.p_along, seen_at: body.p_seen, created_by: user };
         store.rows.push(r);
         return json(200, [out(r)]);
+      }
+      case '/rest/v1/rpc/get_event': {
+        const e = store.events.get(body.p_event);
+        return json(200, e ? [{ data: e.data, version: e.version, updated_at: new Date().toISOString() }] : []);
+      }
+      case '/rest/v1/rpc/put_event': {
+        if (!/^[A-Za-z0-9_-]+$/.test(body.p_data ?? '')) return json(400, { code: '22023', message: 'Ungültige Daten' });
+        const e = store.events.get(body.p_event);
+        if (!e) {
+          store.events.set(body.p_event, { data: body.p_data, version: 1 });
+          return json(200, 1);
+        }
+        if (e.version !== body.p_base_version) return json(500, { code: '40001', message: 'Konflikt' });
+        store.events.set(body.p_event, { data: body.p_data, version: e.version + 1 });
+        return json(200, e.version + 1);
       }
       case '/rest/v1/rpc/delete_sighting': {
         const before = store.rows.length;

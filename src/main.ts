@@ -20,6 +20,7 @@ import { DISCIPLINES, eventKind, type Discipline, type Point, type RaceEvent } f
 import { decodeEvent, normalizeLeg, shareUrl, tokenFromHash } from './share';
 import { loadEvent, loadLastLink, saveEvent, saveLastLink } from './store';
 import { adoptIds, randomId, withIds } from './ids';
+import { EventSync, isShared } from './eventsync';
 import { setSightingOffsets } from './schedule';
 import { alongsNear, latestByAthlete, offsetsFrom, sightingAlong, SightingStore } from './sightings';
 
@@ -46,6 +47,10 @@ const pickEl = document.createElement('div');
 /** Sichtungen des aktuellen Events (geteilt über Supabase) */
 const sightings = new SightingStore(onSightingsChange);
 let lastOffsets = new Map<string, number>();
+/** Ganzes Event live für alle mit dem Link (Stufe 5b) */
+const eventSync = new EventSync(applyRemoteEvent, () => {
+  if (section === 'strecke') renderSheetUnlessTyping();
+});
 /** Panel wurde für die Punkt-Karte eingeklappt (kleiner Bildschirm) → beim Schließen wieder zeigen */
 let pickHidSection: Section | null = null;
 
@@ -232,6 +237,13 @@ function renderSheet(): void {
              <button class="btn btn-primary" id="btn-share" type="button">Link teilen</button>
              <button class="btn" id="btn-load" type="button">Etappe hinzufügen</button>
            </div>
+           <p class="hint live-hint" data-testid="live-hint">${
+             event.id && isShared(event.id)
+               ? eventSync.state === 'offline'
+                 ? '<strong>Gerade offline:</strong> Änderungen werden übertragen, sobald wieder Netz da ist.'
+                 : 'Live geteilt: Änderungen an Strecke, Athleten und Renntag sehen alle, die euren Link haben.'
+               : 'Mit „Link teilen“ seht ihr ab dann alle denselben Stand – Änderungen kommen bei allen an.'
+           }</p>
            <button class="btn btn-quiet" id="btn-reset" type="button">Anderes Rennen laden</button>`;
   sheet.innerHTML = `
     <div class="section-head">
@@ -293,6 +305,13 @@ function render(fit = false): void {
   renderStatus();
   courseMap?.setEvent(event, fit);
   renderAthleteMarkers();
+}
+
+/** Neuigkeiten (Antwort auf einen eigenen Tipp, Abgleich) gleich zeigen – außer jemand tippt gerade. */
+function renderSheetUnlessTyping(): void {
+  const a = document.activeElement;
+  const typing = (a instanceof HTMLInputElement || a instanceof HTMLSelectElement) && $('#sheet').contains(a);
+  if (!typing && !$<HTMLDialogElement>('#athlete-dialog').open) renderSheet();
 }
 
 /** Plan-Positionen laufen mit der Uhr: regelmäßig auffrischen, ohne laufende Eingaben zu stören. */
@@ -480,10 +499,9 @@ function onSightingsChange(): void {
   const changed = applyOffsets();
   renderAthleteMarkers();
   renderStatus();
-  // Sichtungen sind die Antwort auf einen eigenen Tipp oder neue Infos → gleich zeigen,
-  // außer jemand tippt gerade in ein Feld
-  const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLSelectElement;
-  if (!sheetBusy() || changed || (!typing && !$<HTMLDialogElement>('#athlete-dialog').open)) renderSheet();
+  // Sichtungen sind die Antwort auf einen eigenen Tipp oder neue Infos → gleich zeigen
+  if (changed) renderSheet();
+  else renderSheetUnlessTyping();
   // Der Plan beruht auf den alten Zeiten → mit der echten Zeit neu planen
   if (changed && plan && !planBusy) void createPlan();
   document.body.dataset.sightings = String(sightings.list.length);
@@ -502,11 +520,20 @@ async function sightAthlete(i: number): Promise<void> {
   await sightings.add(a.id, along, now);
 }
 
-async function setEvent(ev: RaceEvent | null, fit = true): Promise<void> {
+/** Stand von einem anderen Gerät übernehmen. */
+async function applyRemoteEvent(ev: RaceEvent): Promise<void> {
+  const legsChanged = !event || JSON.stringify(ev.legs.map((l) => [l.name, l.discipline, l.points.length])) !== JSON.stringify(event.legs.map((l) => [l.name, l.discipline, l.points.length]));
+  await setEvent(ev, legsChanged, true);
+  toast('Event wurde von jemand anderem aktualisiert.');
+}
+
+/** @param remote Stand kommt vom Server (nicht wieder hochladen) */
+async function setEvent(ev: RaceEvent | null, fit = true, remote = false): Promise<void> {
   // Strecke oder Athleten geändert → alter Plan passt nicht mehr
   if (plan) clearPlan();
   courseMap?.closePick();
   event = ev && ev.legs.length > 0 ? withIds(ev) : null;
+  eventSync.update(event, !remote);
   sightings.setEvent(event?.athletes.length ? (event.id ?? null) : null);
   applyOffsets();
   if (!event) section = null;
@@ -523,7 +550,8 @@ async function importFiles(files: FileList): Promise<void> {
   for (const file of Array.from(files)) {
     try {
       const parsed = parseGpx(await file.text(), file.name);
-      if (!next) next = { name: parsed.name ?? (file.name.replace(/\.gpx$/i, '') || 'Mein Rennen'), legs: [], date: null, athletes: [] };
+      // Neues Rennen: zufällige Kennung (zwei Leute mit derselben GPX-Datei teilen sonst ein Event)
+      if (!next) next = { id: randomId(), name: parsed.name ?? (file.name.replace(/\.gpx$/i, '') || 'Mein Rennen'), legs: [], date: null, athletes: [] };
       // Gleiche Vereinfachung wie im Teilen-Link → Sender und Empfänger sehen dieselben Zahlen
       next.legs.push(...parsed.legs.map(normalizeLeg));
       added += parsed.legs.length;
@@ -543,6 +571,8 @@ async function importFiles(files: FileList): Promise<void> {
 
 async function openShare(): Promise<void> {
   if (!event) return;
+  // Ab jetzt live: Änderungen sehen alle, die den Link haben
+  void eventSync.share(event);
   const base = new URL(import.meta.env.BASE_URL, location.origin).toString();
   const url = await shareUrl(event, base);
   const dialog = $<HTMLDialogElement>('#share-dialog');
@@ -719,6 +749,8 @@ async function loadFromHash(): Promise<boolean> {
   try {
     await setEvent(await decodeEvent(token));
     saveLastLink(token, BUILD_LABEL);
+    // Link geöffnet → den aktuellen Stand vom Server holen (der Link kann älter sein)
+    if (event) void eventSync.share(event);
     toast('Strecke aus dem Link geladen.');
     return true;
   } catch {
@@ -801,6 +833,8 @@ async function start(): Promise<void> {
     sightings.setEvent(event?.athletes.length ? (event.id ?? null) : null);
     applyOffsets();
     render(true);
+    eventSync.update(event, false);
+    void eventSync.refresh();
   }
   document.body.dataset.ready = 'true';
 }
@@ -809,9 +843,13 @@ void start();
 window.setInterval(tick, 15_000);
 // Sichtungen der anderen abholen (nur wenn die App sichtbar ist)
 window.setInterval(() => {
-  if (event?.athletes.length && document.visibilityState === 'visible') void sightings.refresh();
+  if (document.visibilityState !== 'visible') return;
+  void eventSync.refresh();
+  if (event?.athletes.length) void sightings.refresh();
 }, 20_000);
 document.addEventListener('visibilitychange', () => {
-  if (event?.athletes.length && document.visibilityState === 'visible') void sightings.refresh();
+  if (document.visibilityState !== 'visible') return;
+  void eventSync.refresh();
+  if (event?.athletes.length) void sightings.refresh();
 });
 registerSW({ immediate: true });
