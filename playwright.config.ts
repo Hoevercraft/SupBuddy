@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Logik-Tests laufen in Node: dort dieselbe Zeitzone wie im Browser (CI läuft sonst in UTC)
+process.env.TZ = 'Europe/Berlin';
+
 // Tests laufen gegen den Produktions-Build (vite preview),
 // damit Service Worker und Manifest realistisch geprüft werden.
 export default defineConfig({

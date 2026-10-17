@@ -1,0 +1,24 @@
+name: Supabase wach halten
+
+# Gratis-Projekte pausiert Supabase nach einer Woche ohne Zugriff.
+# Alle 3 Tage ein harmloser Aufruf (Funktion ping, nur mit dem öffentlichen Schlüssel).
+on:
+  schedule:
+    - cron: '23 5 */3 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping
+        run: |
+          code=$(curl -s -o /tmp/out.txt -w '%{http_code}' -X POST \
+            -H "apikey: sb_publishable_k5lTVxYFROnQEBCDw0B4DQ_ZJNpmKcw" \
+            -H "Content-Type: application/json" -d '{}' \
+            https://uldwwhedugbygaukjkly.supabase.co/rest/v1/rpc/ping)
+          cat /tmp/out.txt; echo
+          test "$code" = "200"

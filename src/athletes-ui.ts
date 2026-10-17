@@ -12,6 +12,7 @@ import {
   type RaceEvent,
 } from './model';
 import { planAt, timeAtAlong, timeline, type PlanState } from './schedule';
+import type { Sighting, SyncState } from './sightings';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -37,7 +38,8 @@ function needsTransition(ev: RaceEvent): boolean {
 
 // ---------------------------------------------------------------- Status-Texte
 
-function statusText(ev: RaceEvent, plan: PlanState, now: number): string {
+function statusText(ev: RaceEvent, plan: PlanState, now: number, sighted = false): string {
+  const basis = sighted ? 'Nach Sichtung' : 'Laut Plan';
   switch (plan.state) {
     case 'vor-start': {
       const sameDay = isoDate(new Date(plan.start)) === isoDate(new Date(now));
@@ -47,12 +49,12 @@ function statusText(ev: RaceEvent, plan: PlanState, now: number): string {
       return `Start ${when} · ${relative(plan.start, now)}`;
     }
     case 'im-ziel':
-      return `Laut Plan im Ziel seit ${clock(plan.finish)}`;
+      return `${basis} im Ziel seit ${clock(plan.finish)}`;
     case 'unterwegs': {
       const leg = ev.legs[plan.legIndex];
-      if (plan.inTransition) return `Laut Plan im Wechsel nach ${DISCIPLINES[leg.discipline].label}`;
+      if (plan.inTransition) return `${basis} im Wechsel nach ${DISCIPLINES[leg.discipline].label}`;
       const multi = ev.legs.length > 1 ? ` (${DISCIPLINES[leg.discipline].label})` : '';
-      return `Laut Plan bei km ${km(plan.along)}${multi}`;
+      return `${basis} bei km ${km(plan.along)}${multi}`;
     }
   }
 }
@@ -100,18 +102,40 @@ export function athletesNow(ev: RaceEvent, now: number): AthleteNow[] {
   return ev.athletes.map((athlete) => ({ athlete, plan: planAt(ev, timeline(ev, athlete, today), now) }));
 }
 
-export function athletesSection(ev: RaceEvent, position: Point | null, now: number): string {
+export interface SightingView {
+  /** jüngste Sichtung je Athlet */
+  latest: Map<string, Sighting>;
+  /** eigener Standort liegt an der Strecke → „Jetzt hier“ möglich */
+  atCourse: boolean;
+  sync: SyncState;
+}
+
+function sightingLine(s: Sighting): string {
+  const who = s.mine
+    ? ` · von dir${s.pending ? ', wird übertragen …' : ''} <button type="button" class="link-btn" data-unsight="${esc(s.id)}">zurücknehmen</button>`
+    : '';
+  return `<div class="athlete-sighting" data-testid="athlete-sighting">Gesichtet um ${clock(s.seenAt)} bei km ${km(s.along)}${who}</div>`;
+}
+
+export function athletesSection(ev: RaceEvent, position: Point | null, now: number, sv?: SightingView): string {
   const today = new Date(now);
   const rows = athletesNow(ev, now)
     .map(({ athlete, plan }, i) => {
       const here = position ? hereText(ev, athlete, position, now, today) : '';
+      const seen = athlete.id ? sv?.latest.get(athlete.id) : undefined;
+      const sightBtn =
+        sv?.atCourse && plan.state !== 'im-ziel'
+          ? `<button type="button" class="btn btn-small sight-btn" data-sight="${i}">${esc(athlete.name)} jetzt hier</button>`
+          : '';
       return `
       <li class="athlete" style="--athlete-color:${athlete.color}" data-testid="athlete">
         <span class="athlete-dot" aria-hidden="true">${esc(initials(athlete.name))}</span>
         <div class="athlete-main">
           <div class="athlete-name">${esc(athlete.name)}</div>
-          <div class="athlete-status" data-testid="athlete-status">${esc(statusText(ev, plan, now))}</div>
+          <div class="athlete-status" data-testid="athlete-status">${esc(statusText(ev, plan, now, !!seen))}</div>
+          ${seen ? sightingLine(seen) : ''}
           ${here ? `<div class="athlete-here" data-testid="athlete-here">${esc(here)}</div>` : ''}
+          ${sightBtn}
         </div>
         <button class="athlete-edit" type="button" data-index="${i}" aria-label="${esc(athlete.name)} bearbeiten">Ändern</button>
       </li>`;
@@ -131,7 +155,21 @@ export function athletesSection(ev: RaceEvent, position: Point | null, now: numb
           : `<p class="hint">Trag ein, wer startet, wann und wie schnell. Dann siehst du, wo er laut Plan gerade ist und wann er bei dir vorbeikommt.</p>`
       }
       <button class="btn" id="btn-add-athlete" type="button">Athlet hinzufügen</button>
+      ${rows && sv ? sightingHint(sv, !!position) : ''}
     </section>`;
+}
+
+function sightingHint(sv: SightingView, hasPosition: boolean): string {
+  const how = sv.atCourse
+    ? 'Kommt jemand vorbei, tippe „… jetzt hier“ – der Zeitplan rechnet dann mit der echten Zeit weiter.'
+    : hasPosition
+      ? '„Jetzt hier“ geht, sobald du an der Strecke stehst (bis 150 m).'
+      : 'Mit deinem Standort kannst du an der Strecke melden, wenn jemand vorbeikommt.';
+  const sync =
+    sv.sync === 'offline'
+      ? ' <strong>Gerade offline:</strong> Sichtungen bleiben auf diesem Handy und werden nachgereicht.'
+      : ' Sichtungen sehen alle, die euren Link haben.';
+  return `<p class="hint sight-hint" data-testid="sight-hint">${how}${sync}</p>`;
 }
 
 // ---------------------------------------------------------------- Dialog

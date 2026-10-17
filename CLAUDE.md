@@ -15,7 +15,11 @@
 - Neue Features bekommen mindestens einen Playwright-Test.
 - Features über Branch + Pull Request; `main` deployt automatisch.
 - Keine Browser-APIs nutzen, die in einer Capacitor-WebView fehlen, ohne Fallback.
-- Keine API-Keys im Code (Repo ist öffentlich). Externe Dienste bevorzugt keyless.
+- Keine geheimen Schlüssel im Code (Repo ist öffentlich). Externe Dienste bevorzugt keyless.
+  Ausnahme Supabase: URL + publishable key sind öffentlich (stehen in `src/backend.ts`), die Sicherheit
+  liegt in `supabase/schema.sql` (Tabelle nicht veröffentlicht, nur geprüfte Funktionen). Secret-/service_role-Key und
+  DB-Passwort NIE ins Repo. Schema-Änderungen: SQL-Datei anpassen, Jan führt sie im Supabase SQL Editor aus.
+- Tests sprechen nie den echten Supabase-Dienst an (`navigator.webdriver` → Attrappe aus `tests/helpers.ts`).
 - Pfade relativ zu `import.meta.env.BASE_URL` bauen, nie hart `/SupBuddy/`.
 
 ## Befehle

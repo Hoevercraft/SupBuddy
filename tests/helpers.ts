@@ -108,6 +108,8 @@ export async function countColorPixels(
 
 export async function openApp(page: Page, hash = ''): Promise<void> {
   await blockTiles(page);
+  // Nie den echten Supabase-Dienst aus Tests ansprechen
+  if (!backendMocked.has(page)) await mockBackend(page);
   await page.goto(`/${hash}`);
   await page.locator('body[data-ready="true"]').waitFor();
 }
@@ -230,4 +232,69 @@ export async function openSection(page: Page, label: 'Athleten' | 'Anfeuer-Plan'
   const b = page.locator(`.ctrl-section-btn[aria-label="${label}"]`);
   if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click();
   await expect(page.getByTestId('section-title')).toHaveText(label);
+}
+
+// ---------------------------------------------------------------- Supabase-Attrappe
+
+export interface BackendStore {
+  rows: { id: string; event_id: string; athlete_id: string; along_m: number; seen_at: string; created_by: string }[];
+  /** z. B. 503 = Dienst nicht erreichbar */
+  status: number;
+  users: number;
+  calls: string[];
+  /** Anonyme Anmeldung im Supabase-Projekt aus (wie vor dem Einschalten) */
+  signupDisabled?: boolean;
+}
+
+export const newBackendStore = (): BackendStore => ({ rows: [], status: 200, users: 0, calls: [] });
+
+const backendMocked = new WeakSet<Page>();
+
+/**
+ * Supabase-Attrappe (anonyme Anmeldung + RPC-Funktionen wie in supabase/schema.sql).
+ * Mehrere Seiten mit demselben `store` teilen sich die Sichtungen wie echte Geräte.
+ */
+export async function mockBackend(page: Page, store: BackendStore = newBackendStore()): Promise<BackendStore> {
+  backendMocked.add(page);
+  // Die App spricht in Tests nur diese Adresse an (siehe baseUrl in src/backend.ts)
+  await page.addInitScript(() => {
+    (window as unknown as { __supbuddyBackendUrl: string }).__supbuddyBackendUrl = 'https://supabase.test';
+  });
+  await page.route(/supabase\.test\//, async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    store.calls.push(url.pathname);
+    const json = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' } });
+    if (store.status !== 200) return json(store.status, { message: 'down' });
+    if (!req.headers()['apikey']?.startsWith('sb_publishable_')) return json(401, { message: 'apikey fehlt' });
+    if (url.pathname === '/auth/v1/signup' && store.signupDisabled) {
+      return json(422, { code: 422, error_code: 'anonymous_provider_disabled', msg: 'Anonymous sign-ins are disabled' });
+    }
+    if (url.pathname === '/auth/v1/signup' || url.pathname === '/auth/v1/token') {
+      const n = ++store.users;
+      return json(200, { access_token: `user-${n}`, refresh_token: `r-${n}`, expires_in: 3600 });
+    }
+    const user = (req.headers()['authorization'] ?? '').replace('Bearer ', '');
+    if (!user.startsWith('user-')) return json(401, { message: 'Anmeldung fehlt' });
+    const body = JSON.parse(req.postData() ?? '{}');
+    const out = (r: BackendStore['rows'][number]) => ({ id: r.id, athlete_id: r.athlete_id, along_m: r.along_m, seen_at: r.seen_at, mine: r.created_by === user });
+    switch (url.pathname) {
+      case '/rest/v1/rpc/get_sightings':
+        return json(200, store.rows.filter((r) => r.event_id === body.p_event).map(out));
+      case '/rest/v1/rpc/add_sighting': {
+        const r = { id: `s-${store.rows.length + 1}-${Date.now()}`, event_id: body.p_event, athlete_id: body.p_athlete, along_m: body.p_along, seen_at: body.p_seen, created_by: user };
+        store.rows.push(r);
+        return json(200, [out(r)]);
+      }
+      case '/rest/v1/rpc/delete_sighting': {
+        const before = store.rows.length;
+        store.rows = store.rows.filter((r) => !(r.id === body.p_id && r.created_by === user));
+        return json(200, store.rows.length < before);
+      }
+    }
+    return json(404, { message: 'unbekannt' });
+  });
+  return store;
 }

@@ -35,6 +35,21 @@ export interface Timeline {
   segments: Segment[];
 }
 
+/**
+ * Korrektur je Athlet aus Sichtungen (ms, + = später als geplant), über die Athleten-Kennung.
+ * Wird zentral gesetzt (siehe sightings.ts), damit alle Anzeigen und der Plan sie nutzen.
+ */
+const sightingOffsets = new Map<string, number>();
+
+export function setSightingOffsets(offsets: Map<string, number>): void {
+  sightingOffsets.clear();
+  for (const [k, v] of offsets) sightingOffsets.set(k, v);
+}
+
+export function sightingOffset(athlete: Athlete): number {
+  return athlete.id ? (sightingOffsets.get(athlete.id) ?? 0) : 0;
+}
+
 /** Startzeitpunkt (ms) aus Renntag und "HH:MM" in Ortszeit des Geräts. */
 export function startTime(ev: RaceEvent, athlete: Athlete, today: Date): number {
   const [h, m] = athlete.start.split(':').map(Number);
@@ -43,8 +58,9 @@ export function startTime(ev: RaceEvent, athlete: Athlete, today: Date): number 
   return base.getTime();
 }
 
-export function timeline(ev: RaceEvent, athlete: Athlete, today: Date): Timeline {
-  const start = startTime(ev, athlete, today);
+/** Zeitplan des Athleten; mit Korrektur aus der letzten Sichtung (raw = ohne). */
+export function timeline(ev: RaceEvent, athlete: Athlete, today: Date, raw = false): Timeline {
+  const start = startTime(ev, athlete, today) + (raw ? 0 : sightingOffset(athlete));
   const segments: Segment[] = [];
   let t = start;
   let offset = 0;

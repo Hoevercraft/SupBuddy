@@ -30,6 +30,8 @@ export interface Pace {
 }
 
 export interface Athlete {
+  /** Kennung für Sichtungen (über Geräte hinweg gleich) */
+  id?: string;
   name: string;
   color: string;
   /** Startzeit am Renntag, "HH:MM" (Ortszeit) */
@@ -46,6 +48,8 @@ export const DEFAULT_TRANSITION = 180;
 export const ATHLETE_COLORS = ['#d62839', '#1d4ed8', '#0f766e', '#a21caf', '#b45309', '#334155'];
 
 export interface RaceEvent {
+  /** Kennung des Events (steckt im Teilen-Link; Sichtungen hängen daran) */
+  id?: string;
   name: string;
   legs: Leg[];
   /** Renntag "YYYY-MM-DD"; null = heute */
