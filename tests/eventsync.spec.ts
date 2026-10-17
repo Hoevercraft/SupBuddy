@@ -1,5 +1,5 @@
 import { test, expect, type Browser, type Page, type TestInfo } from '@playwright/test';
-import { canonical, merge3 } from '../src/eventsync';
+import { canonical, keepLocalOnly, merge3 } from '../src/eventsync';
 import type { Athlete, Point, RaceEvent } from '../src/model';
 import { decodeEvent, encodeEvent, normalizeLeg } from '../src/share';
 import { fixture, mockBackend, newBackendStore, openApp, openSection, type BackendStore } from './helpers';
@@ -61,6 +61,15 @@ test.describe('Zusammenführen', () => {
     expect(m.legs[0].discipline).toBe('lauf');
   });
 
+  test('Ohne bekannten Ausgangsstand: Server gilt, nur lokal eingetragene Athleten bleiben', () => {
+    const base = baseEvent();
+    const local = { ...base, athletes: [...base.athletes, ath('athlete-nils-1', 'Nils')] };
+    const remote = { ...base, athletes: [ath('athlete-jan-1', 'Jan', '13:00')] };
+    // (Max fehlt auf dem Server – ob gelöscht oder nie hochgeladen, ist ohne Ausgangsstand nicht zu
+    // unterscheiden; lieber behalten als verlieren)
+    expect(keepLocalOnly(remote, local).athletes.map((a) => `${a.name} ${a.start}`)).toEqual(['Jan 13:00', 'Max 10:00', 'Nils 10:00']);
+  });
+
   test('Vergleich nach Inhalt ist stabil über Kodieren/Dekodieren (kein Hin-und-her zwischen Geräten)', async () => {
     const ev = baseEvent();
     const back = { ...(await decodeEvent(await encodeEvent(ev))), id: ev.id };
@@ -79,6 +88,7 @@ async function device(browser: Browser, info: TestInfo, store: BackendStore): Pr
 }
 
 async function addAthlete(page: Page, name: string, start = '10:00') {
+  await expect(page.locator('body.has-event')).toHaveCount(1); // Strecke fertig geladen
   await openSection(page, 'Athleten');
   await page.getByRole('button', { name: 'Athlet hinzufügen' }).click();
   const d = page.locator('#athlete-dialog');
@@ -200,4 +210,47 @@ test('Neue Strecke bekommt eine zufällige Kennung (gleiche GPX-Datei bei zwei L
   expect(id1).toMatch(/^[A-Za-z0-9_-]{22}$/);
   expect(id2).toMatch(/^[A-Za-z0-9_-]{22}$/);
   expect(id2).not.toBe(id1);
+});
+
+test('Server erst später erreichbar (z. B. SQL noch nicht ausgeführt): Warnung, und danach verliert niemand Athleten', async ({ browser }, info) => {
+  test.slow();
+  const store = newBackendStore();
+  store.eventsMissing = true;
+  const a = await device(browser, info, store);
+  await openApp(a);
+  await a.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await addAthlete(a, 'Jan');
+  await openSection(a, 'Strecke');
+  await a.getByRole('button', { name: 'Link teilen' }).click();
+  await expect(a.getByTestId('share-link')).toHaveValue(/#e=/);
+  const link = await a.getByTestId('share-link').inputValue();
+  await a.locator('#share-dialog').getByRole('button', { name: 'Schließen' }).click();
+  await addAthlete(a, 'Nils', '10:05');
+  // Deutlich sichtbar: unten in der Leiste
+  await a.getByRole('button', { name: 'Athleten schließen' }).click();
+  await expect(a.getByTestId('sync-warn')).toContainText('Nicht synchron');
+
+  const b = await device(browser, info, store);
+  await openApp(b, new URL(link).hash);
+  await addAthlete(b, 'Lisa', '10:10');
+  expect(store.events.size).toBe(0);
+
+  // Funktionen jetzt da → beim nächsten Abgleich kommt alles zusammen
+  store.eventsMissing = false;
+  for (let i = 0; i < 3; i++) {
+    await sync(a);
+    await a.waitForTimeout(1500);
+    await sync(b);
+    await b.waitForTimeout(1500);
+  }
+  for (const p of [a, b]) {
+    await openSection(p, 'Athleten');
+    await expect.poll(async () => (await names(p).allTextContents()).sort(), { timeout: 15_000 }).toEqual(['Jan', 'Lisa', 'Nils']);
+  }
+  const server = await decodeEvent([...store.events.values()][0].data);
+  expect(server.athletes.map((x) => x.name).sort()).toEqual(['Jan', 'Lisa', 'Nils']);
+  await a.getByRole('button', { name: 'Athleten schließen' }).click();
+  await expect(a.getByTestId('sync-warn')).toHaveCount(0);
+  await a.context().close();
+  await b.context().close();
 });

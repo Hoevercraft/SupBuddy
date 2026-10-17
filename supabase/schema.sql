@@ -212,7 +212,8 @@ begin
     return 1;
   end if;
   if cur <> coalesce(p_base_version, -1) then
-    raise exception 'Konflikt' using errcode = '40001';
+    -- Eigener Fehlercode → HTTP 409. (Nicht 40001: den wiederholt die Daten-API endlos.)
+    raise exception 'Konflikt' using errcode = 'PT409';
   end if;
   update supbuddy_private.events e
     set data = p_data, version = cur + 1, updated_by = uid, updated_at = now()

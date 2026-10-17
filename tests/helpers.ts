@@ -246,6 +246,8 @@ export interface BackendStore {
   signupDisabled?: boolean;
   /** Geteilte Events (Stufe 5b) */
   events: Map<string, { data: string; version: number }>;
+  /** Event-Funktionen fehlen auf dem Server (SQL noch nicht ausgeführt) */
+  eventsMissing?: boolean;
 }
 
 export const newBackendStore = (): BackendStore => ({ rows: [], status: 200, users: 0, calls: [], events: new Map() });
@@ -290,6 +292,12 @@ export async function mockBackend(page: Page, store: BackendStore = newBackendSt
         store.rows.push(r);
         return json(200, [out(r)]);
       }
+      case '/rest/v1/rpc/get_event':
+      case '/rest/v1/rpc/put_event':
+        // Datenbank-Funktionen noch nicht eingerichtet (wie vor dem SQL-Schritt)
+        if (store.eventsMissing) return json(404, { code: 'PGRST202', message: 'Could not find the function' });
+    }
+    switch (url.pathname) {
       case '/rest/v1/rpc/get_event': {
         const e = store.events.get(body.p_event);
         return json(200, e ? [{ data: e.data, version: e.version, updated_at: new Date().toISOString() }] : []);
@@ -301,7 +309,7 @@ export async function mockBackend(page: Page, store: BackendStore = newBackendSt
           store.events.set(body.p_event, { data: body.p_data, version: 1 });
           return json(200, 1);
         }
-        if (e.version !== body.p_base_version) return json(500, { code: '40001', message: 'Konflikt' });
+        if (e.version !== body.p_base_version) return json(409, { code: 'PT409', message: 'Konflikt' });
         store.events.set(body.p_event, { data: body.p_data, version: e.version + 1 });
         return json(200, e.version + 1);
       }
