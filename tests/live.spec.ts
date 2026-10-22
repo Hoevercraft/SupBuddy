@@ -66,10 +66,11 @@ test.describe('Logik', () => {
     expect(fix.speeds.rad).toBeCloseTo(fix.measured!, 5); // > 2 km gemessen → nur noch gemessen
   });
 
-  test('Vor dem Start bzw. am Anfang: noch kein Live-Anker; kurz nach dem Start mit der Schätzung gemischt', () => {
+  test('Am Start: kein Tempo-Anker, sondern „wartet“; kurz nach dem Start mit der Schätzung gemischt', () => {
     const ev = outAndBack();
     const a = ev.athletes[0];
-    expect(liveFix(ev, a, snapTrack(ev, a, ride(0, T('09:50'), 10), TODAY))).toBeNull();
+    expect(liveFix(ev, a, snapTrack(ev, a, ride(0, T('09:50'), 10), TODAY))).toMatchObject({ waiting: true, measured: null, speeds: {} });
+    expect(liveFix(ev, a, [])).toBeNull();
     // 1 km mit 40 km/h gemessen, Plan 30 km/h → halbe-halbe
     const fix = liveFix(ev, a, snapTrack(ev, a, [at(0, T('10:00')), at(1000, T('10:01') + 30_000)], TODAY))!;
     expect(fix.measured! * 3.6).toBeCloseTo(40, 0);
@@ -95,6 +96,25 @@ test.describe('Logik', () => {
     c = correctionsFrom(ev, [s(9000, '10:16')], fixes, TODAY).get(a.id!)!;
     near(timeAtAlong(tl(), 9000), T('10:16'));
     expect(c.speeds?.rad).toBeCloseTo(10, 1);
+  });
+
+  test('Wartet am Start: nach der Startzeit beginnt der Plan erst, wenn er losfährt; vorher und ohne Meldung nicht', () => {
+    const ev = outAndBack();
+    const a = ev.athletes[0];
+    const id = a.id!;
+    const fixAt = (hhmm: string) => new Map([[id, liveFix(ev, a, snapTrack(ev, a, ride(0, T('09:50'), (T(hhmm) - T('09:50')) / 60_000), TODAY))!]]);
+    // 09:58, Start 10:00: Plan gilt (keine Verschiebung)
+    expect(correctionsFrom(ev, [], fixAt('09:58'), TODAY, T('09:58')).has(id)).toBe(false);
+    // 10:07, steht noch am Start (letzte Meldung 10:07): Start = jetzt → 7 min später als geplant
+    let c = correctionsFrom(ev, [], fixAt('10:07'), TODAY, T('10:07')).get(id)!;
+    expect(c.offset).toBe(7 * 60_000);
+    expect(timeAtAlong(buildTimeline(ev, a, TODAY, c), 3000)).toBe(T('10:13'));
+    // Eine Minute später, Meldung noch frisch: Start wandert mit der Uhr
+    c = correctionsFrom(ev, [], fixAt('10:07'), TODAY, T('10:08')).get(id)!;
+    expect(c.offset).toBe(8 * 60_000);
+    // Keine Meldung mehr seit 10:07 (still > 5 min): ab der letzten Meldung, nicht weiter verschoben
+    c = correctionsFrom(ev, [], fixAt('10:07'), TODAY, T('10:30')).get(id)!;
+    expect(c.offset).toBe(7 * 60_000);
   });
 
   test('Triathlon: gemessen wird nur die laufende Disziplin; kommende behalten die Schätzung', () => {
@@ -260,5 +280,61 @@ test('Live-Tracking: einrichten per QR/Link, Position + Pace aus Traccar, Sichtu
   await expect(row.getByTestId('athlete-status')).toHaveText('Laut Plan bei km 8,5');
   await expect(row.getByTestId('athlete-live')).toHaveCount(0);
   expect(eventId).toMatch(/^[A-Za-z0-9_-]{8,40}$/);
+  await a.context().close();
+});
+
+test('Wartet am Start: Startzeit vorbei, aber Live-Position noch am Start → Plan hält, bis er losfährt', async ({ browser }, info) => {
+  test.slow();
+  const store = newBackendStore();
+  const a = await device(browser, info, store, '10:07');
+  await openApp(a);
+  await a.locator('#file-input').setInputFiles(fixture('radrennen-lueneburg.gpx'));
+  await a.getByRole('button', { name: 'Athlet hinzufügen' }).click();
+  const d = a.locator('#athlete-dialog');
+  await d.getByLabel('Name des Athleten').fill('Jan');
+  await d.getByLabel('Startzeit').fill('10:00');
+  await d.getByRole('button', { name: 'Speichern' }).click();
+  await openSection(a, 'Strecke');
+  await a.getByRole('button', { name: 'Link teilen' }).click();
+  await expect(a.getByTestId('share-link')).toHaveValue(/#e=[A-Za-z0-9_-]+$/);
+  await a.locator('#share-dialog').getByRole('button', { name: 'Schließen' }).click();
+  await expect.poll(() => store.events.size).toBe(1);
+  await openSection(a, 'Athleten');
+  const row = a.getByTestId('athlete').filter({ hasText: 'Jan' });
+  // Gegenprobe: ohne Live-Daten fährt er laut Plan seit 10:00
+  await expect(row.getByTestId('athlete-status')).toHaveText('Laut Plan bei km 3,5');
+  await row.getByRole('button', { name: 'Jan bearbeiten' }).click();
+  await d.getByRole('button', { name: 'Live-Tracking einrichten' }).click();
+  await expect(d.getByTestId('live-qr')).toBeVisible();
+  await d.getByRole('button', { name: 'Abbrechen' }).click();
+  const token = store.trackers[0].token;
+
+  // Steht seit 09:55 am Start (Welle verschoben), letzte Meldung 10:05
+  const leg = fixtureLeg();
+  for (let m = 0; m <= 10; m++) {
+    const p = pointAtDistance(leg.points, 20);
+    traccarSend(store, token, p.lat + m * 1e-6, p.lng, T('09:55') + m * 60_000);
+  }
+  await wake(a);
+  await expect(row.getByTestId('athlete-status')).toHaveText('Live: wartet am Start');
+  await expect(row.getByTestId('athlete-live')).toHaveText('Live vor 2 min · am Start');
+  // Plan beginnt erst jetzt (10:07, nicht bei der letzten Meldung 10:05): bei mir (km 9,4, 30 km/h) um 10:26
+  await a.getByRole('button', { name: 'Standort anzeigen' }).click();
+  await expect(row.getByTestId('athlete-here')).toContainText('ca. 10:26');
+  // Am Start noch geschätztes Tempo und Sichtung möglich (nichts gemessen)
+  await row.getByRole('button', { name: 'Jan bearbeiten' }).click();
+  await expect(d.getByLabel('Rad-Tempo in km/h')).toBeVisible();
+  await d.getByRole('button', { name: 'Abbrechen' }).click();
+  await a.getByRole('button', { name: 'Athleten schließen' }).click();
+  await expect(a.getByTestId('statusbar')).toContainText('wartet am Start · live');
+
+  // Losgefahren um 10:07, um 10:10 bei km 1,8 (36 km/h)
+  for (let i = 1; i <= 3; i++) {
+    const p = pointAtDistance(leg.points, 20 + i * 600);
+    traccarSend(store, token, p.lat, p.lng, T('10:07') + i * 60_000);
+  }
+  await a.clock.setFixedTime(new Date(T('10:10')));
+  await openSection(a, 'Athleten');
+  await expect(row.getByTestId('athlete-status')).toHaveText('Live bei km 1,8');
   await a.context().close();
 });

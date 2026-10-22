@@ -51,6 +51,11 @@ export function basisOf(lv: LiveView | undefined, seen: Sighting | undefined): B
   return seen ? 'sighting' : 'plan';
 }
 
+/** Startzeit vorbei, aber Live-Daten zeigen ihn noch am Start (z. B. Wellenstart). */
+function waitingAtStart(lv: LiveView | undefined, seen: Sighting | undefined, plan: PlanState): boolean {
+  return !!lv?.fresh && !!lv.fix?.waiting && (!seen || seen.seenAt <= lv.fix.at) && plan.state === 'unterwegs';
+}
+
 function statusText(ev: RaceEvent, plan: PlanState, now: number, basisKind: Basis = 'plan'): string {
   const basis = BASIS[basisKind];
   switch (plan.state) {
@@ -89,6 +94,7 @@ export function shortStatus(ev: RaceEvent, athlete: Athlete, plan: PlanState, po
   const s = shortStatusPlain(ev, athlete, plan, position, now);
   // Woher die Zeit kommt: Live-Tracking, Sichtung oder nur der Plan
   if (lv?.fix && (seenAt === undefined || seenAt <= lv.fix.at)) {
+    if (lv.fresh && lv.fix.waiting && plan.state === 'unterwegs') return 'wartet am Start · live';
     return lv.fresh ? `${s} · live` : `${s} · zuletzt live ${clock(lv.fix.at)}`;
   }
   return seenAt === undefined ? s : `${s} · gesichtet ${clock(seenAt)}`;
@@ -151,7 +157,7 @@ export function athletesSection(ev: RaceEvent, position: Point | null, now: numb
       const live = lv ? liveLine(lv, now) : '';
       // Frische Live-Daten: Sichten unnötig
       const sightBtn =
-        sv?.atCourse && plan.state !== 'im-ziel' && !lv?.fresh
+        sv?.atCourse && plan.state !== 'im-ziel' && !lv?.active
           ? `<button type="button" class="btn btn-small sight-btn" data-sight="${i}">${esc(athlete.name)} jetzt hier</button>`
           : '';
       return `
@@ -159,7 +165,7 @@ export function athletesSection(ev: RaceEvent, position: Point | null, now: numb
         <span class="athlete-dot" aria-hidden="true">${esc(initials(athlete.name))}</span>
         <div class="athlete-main">
           <div class="athlete-name">${esc(athlete.name)}</div>
-          <div class="athlete-status" data-testid="athlete-status">${esc(statusText(ev, plan, now, basisOf(lv, seen)))}</div>
+          <div class="athlete-status" data-testid="athlete-status">${esc(waitingAtStart(lv, seen, plan) ? 'Live: wartet am Start' : statusText(ev, plan, now, basisOf(lv, seen)))}</div>
           ${live ? `<div class="athlete-live${lv?.fresh ? ' is-fresh' : ''}" data-testid="athlete-live">${esc(live)}</div>` : ''}
           ${seen ? sightingLine(seen) : ''}
           ${here ? `<div class="athlete-here" data-testid="athlete-here">${esc(here)}</div>` : ''}
