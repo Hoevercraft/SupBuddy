@@ -358,6 +358,8 @@ function sheetBusy(): boolean {
 
 function tick(): void {
   if (!event || event.athletes.length === 0) return;
+  // „Wartet am Start“ hängt an der Uhr (ohne neu zu planen, das macht der Abgleich)
+  applyOffsets();
   renderAthleteMarkers();
   renderStatus();
   if (!sheetBusy()) renderSheet();
@@ -746,7 +748,7 @@ function bindEvents(): void {
     } else if (t.closest('.athlete-edit') && event) {
       const i = Number((t.closest('.athlete-edit') as HTMLElement).dataset.index);
       const a = event.athletes[i];
-      openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, i, !!a && live.view(event, a, Date.now()).fresh);
+      openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, i, !!a && live.view(event, a, Date.now()).active);
       renderLiveSetup();
     }
     else if (t.closest('#btn-reset')) {

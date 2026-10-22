@@ -30,7 +30,8 @@ export function liveLine(lv: LiveView, now: number): string {
   const avg = lv.fix?.measured ? ` · Ø ${speedText(lv.fix.discipline, lv.fix.measured)}` : '';
   if (now - lv.lastAt >= 5 * 60_000) return `Zuletzt live ${ago}${avg}`;
   if (!lv.onCourse) return `Live ${ago} · nicht an der Strecke`;
-  if (!lv.fix) return `Live ${ago} · noch nicht gestartet`;
+  if (!lv.fix) return `Live ${ago}`;
+  if (lv.fix.waiting) return `Live ${ago} · am Start`;
   return `Live ${ago}${avg}`;
 }
 

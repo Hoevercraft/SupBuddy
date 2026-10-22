@@ -15,7 +15,9 @@ import { latestByAthlete, type Sighting } from './sightings';
  *  - Gemessene Pace = Schnitt der laufenden Disziplin seit ihrem Beginn (nicht das Tempo der
  *    letzten Minuten – das verfälscht z. B. bei Abfahrten). Am Anfang mit der geschätzten Pace
  *    gemischt, bis 2 km gemessen sind. Kommende Disziplinen behalten die geschätzte Pace.
- *  - Vor dem Start (noch keine 200 m auf der Strecke) gilt weiter der Plan.
+ *  - Noch am Start (keine 200 m auf der Strecke): vor der geplanten Startzeit gilt der Plan;
+ *    danach „wartet am Start“ – der Plan beginnt erst, wenn er wirklich losfährt (Wellenstart,
+ *    Verschiebung). Ohne frische Meldung ab der letzten Meldung am Start.
  *  - Kommt länger nichts (Funkloch, Akku), rechnet die Prognose ab der letzten Position weiter;
  *    eine neuere Sichtung wird dann wieder als Anker genommen.
  */
@@ -53,6 +55,8 @@ export interface LiveFix {
   measured: number | null;
   /** für die Prognose (gemischt mit der Schätzung) */
   speeds: Partial<Record<Discipline, number>>;
+  /** steht noch am Start (keine 200 m gefahren) */
+  waiting: boolean;
 }
 
 // ---------------------------------------------------------------- Logik
@@ -146,11 +150,12 @@ export function snapTrack(ev: RaceEvent, athlete: Athlete, points: LivePoint[], 
   return out;
 }
 
-/** Anker und gemessene Pace aus den eingerasteten Positionen; null = (noch) nicht unterwegs. */
+/** Anker und gemessene Pace aus den eingerasteten Positionen; null = keine Position an der Strecke. */
 export function liveFix(ev: RaceEvent, athlete: Athlete, snapped: SnappedPoint[]): LiveFix | null {
   const last = snapped[snapped.length - 1];
-  if (!last || last.along < LIVE_MOVED_M) return null;
+  if (!last) return null;
   const { discipline, runStart } = disciplineAt(ev, last.along);
+  if (last.along < LIVE_MOVED_M) return { along: last.along, at: last.at, discipline, measured: null, speeds: {}, waiting: true };
   // Bezug: letzter Zeitpunkt, an dem er noch am Anfang der Disziplin war – sonst der erste Punkt darin
   const atStart = snapped.filter((s) => s.along <= runStart + 100 && s.at <= last.at);
   const ref = atStart[atStart.length - 1] ?? snapped.find((s) => s.along >= runStart);
@@ -166,20 +171,27 @@ export function liveFix(ev: RaceEvent, athlete: Athlete, snapped: SnappedPoint[]
     const w = Math.min(1, (last.along - ref.along) / BLEND_M);
     speeds[discipline] = w * measured + (1 - w) * planned;
   }
-  return { along: last.along, at: last.at, discipline, measured, speeds };
+  return { along: last.along, at: last.at, discipline, measured, speeds, waiting: false };
 }
 
 /**
  * Korrekturen je Athlet aus Sichtungen und Live-Tracking. Anker ist die jüngste Information
  * (Live-Position oder Sichtung); die gemessene Pace gilt in beiden Fällen.
  */
-export function correctionsFrom(ev: RaceEvent, sightings: Sighting[], fixes: Map<string, LiveFix>, today: Date): Map<string, Correction> {
+export function correctionsFrom(ev: RaceEvent, sightings: Sighting[], fixes: Map<string, LiveFix>, today: Date, now = today.getTime()): Map<string, Correction> {
   const latest = latestByAthlete(sightings);
   const out = new Map<string, Correction>();
   for (const a of ev.athletes) {
     if (!a.id) continue;
     const fix = fixes.get(a.id);
     const s = latest.get(a.id);
+    if (fix?.waiting && (!s || s.seenAt <= fix.at)) {
+      // Steht am Start: Start frühestens jetzt (bzw. bei der letzten Meldung, wenn keine mehr kommt)
+      const hold = now - fix.at < LIVE_STALE_MS ? now : fix.at;
+      const offset = hold - timeAtAlong(buildTimeline(ev, a, today, null), fix.along);
+      if (offset > 0) out.set(a.id, { offset });
+      continue;
+    }
     const anchor = fix && (!s || s.seenAt <= fix.at) ? { along: fix.along, at: fix.at } : s ? { along: s.along, at: s.seenAt } : null;
     if (!anchor) continue;
     const speeds = fix && Object.keys(fix.speeds).length ? fix.speeds : undefined;
@@ -215,8 +227,10 @@ export interface LiveView {
   /** letzte Position liegt an der Strecke */
   onCourse: boolean;
   fix: LiveFix | null;
-  /** Live-Daten frisch → Sichtung und Pace-Eingabe entfallen */
+  /** Live-Daten frisch (an der Strecke) */
   fresh: boolean;
+  /** frisch und unterwegs → Sichtung und Pace-Eingabe entfallen */
+  active: boolean;
 }
 
 /** Live-Positionen eines Events (nur im Speicher; beim Öffnen neu geholt). */
@@ -338,6 +352,7 @@ export class LiveStore {
       onCourse: !!last && snapped[snapped.length - 1]?.at === last.at,
       fix,
       fresh: !!fix && now - fix.at < LIVE_STALE_MS,
+      active: !!fix && !fix.waiting && now - fix.at < LIVE_STALE_MS,
     };
   }
 }
