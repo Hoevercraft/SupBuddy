@@ -34,13 +34,24 @@ Bereich **Strecke** → **„Link teilen“**. Alle mit dem Link sehen dasselbe 
 Kommt ein Athlet an dir vorbei, tippe **„… jetzt hier“** (geht bis 150 m neben der Strecke). Der Zeitplan rechnet dann für alle mit der echten Zeit weiter. Vertippt? **„zurücknehmen“**.
 
 ### 7. Live-Tracking (optional)
-Der Athlet kann seine Position live senden – mit der kostenlosen App **Traccar Client** (iPhone und Android):
+Der Athlet kann seine Position live senden – alle 15 Sekunden, mit der kostenlosen App **Traccar Client** (iPhone und Android):
 1. Athleten bearbeiten → **„Live-Tracking einrichten“** (geht, sobald das Event geteilt ist).
 2. Der Athlet installiert Traccar Client und scannt den QR-Code bzw. tippt **„In Traccar öffnen“**.
 3. Standortberechtigung **„Immer“** und **„Genauer Standort“** erlauben, in Traccar **„Kontinuierliche Standortverfolgung“** aktivieren und das Tracking einschalten.
 4. Nach dem Rennen in Traccar das Tracking ausschalten und die **„Kontinuierliche Standortverfolgung“** wieder deaktivieren. Dann sendet das Handy keine Daten mehr – du behältst die Kontrolle.
 
 Gesendet wird nur am Renntag. Mit Live-Tracking zeigt SupBuddy die echte Position (grüner Ring am Marker) statt der Schätzung.
+
+**Angezeigt wird die Position nur auf der Strecke.** Eine Live-Position zählt erst, wenn der Athlet an der Strecke ist (bis 300 m daneben). Ist er noch zu Hause, auf der Anreise oder nach dem Ziel unterwegs nach Hause, sehen die Fans **keinen Live-Standort** – SupBuddy zeigt dann weiter die Schätzung („Laut Plan …“) und nur den Hinweis „nicht an der Strecke“. Solche Positionen werden nirgends in der App angezeigt; mit dem Event werden sie gelöscht.
+
+| Situation | Was die Fans sehen |
+|---|---|
+| Abseits der Strecke (z. B. zu Hause, Anreise) | Plan („Laut Plan bei km …“), Hinweis „nicht an der Strecke“ – kein Standort |
+| Am Start, Startzeit noch nicht erreicht | Plan („Start um …“) |
+| Am Start, Startzeit vorbei (z. B. Wellenstart) | „wartet am Start“ – der Plan beginnt erst, wenn er losfährt |
+| Unterwegs auf der Strecke | „Live bei km …“, echte Position; Zeiten mit seiner Durchschnitts-Pace |
+| Über 2 min keine Meldung (Funkloch) | „Geschätzt bei km …“ ab der letzten echten Position |
+| Über 5 min keine Meldung | zusätzlich „Zuletzt live vor X min“; „… jetzt hier“ ist wieder möglich |
 
 ### Bedienung auf einen Blick
 | Element | Funktion |
@@ -73,7 +84,7 @@ Tippe beim Vorbeikommen „… jetzt hier“ – dann stimmt der Zeitplan wieder
 Bis 2 Tage nach dem Renntag (ohne Renntag: 7 Tage nach der letzten Änderung). Danach löscht der Server alles; auf deinem Gerät bleibt das Event erhalten, wird aber nicht mehr geteilt.
 
 **Wer sieht die Live-Position?**
-Alle, die euren Link haben. Positionen werden nur am Renntag angenommen und mit dem Event gelöscht. Tracking beenden: im Athleten-Dialog **„Live-Tracking beenden“** oder in Traccar ausschalten.
+Alle, die euren Link haben – aber nur, solange der Athlet an der Strecke ist (siehe Tabelle oben). Positionen werden nur am Renntag angenommen und mit dem Event gelöscht. Tracking beenden: im Athleten-Dialog **„Live-Tracking beenden“** oder in Traccar ausschalten.
 
 **Funktioniert das auch ohne Netz?**
 Karte und Plan brauchen Netz zum Laden. Sichtungen und Änderungen werden lokal gespeichert und nachgereicht („Nicht synchron“), sobald es wieder geht.
