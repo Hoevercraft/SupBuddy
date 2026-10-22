@@ -62,7 +62,7 @@ export function liveSetupHtml(s: LiveSetup): string {
       return `${head}<p class="hint">Geht, sobald das Event geteilt ist (Bereich Strecke → „Link teilen“).</p>`;
     case 'idle':
       return `${head}
-        <p class="hint">Der Athlet sendet mit der kostenlosen App „Traccar Client“ jede Minute seinen Standort. Alle mit eurem Link sehen ihn dann live – Sichtungen und Pace braucht es für ihn nicht mehr.</p>
+        <p class="hint">Der Athlet sendet mit der kostenlosen App „Traccar Client“ alle 15 Sekunden seinen Standort. Alle mit eurem Link sehen ihn dann live – Sichtungen und Pace braucht es für ihn nicht mehr.</p>
         <button type="button" class="btn" id="live-create"${s.busy ? ' disabled' : ''}>${s.busy ? 'Wird eingerichtet …' : 'Live-Tracking einrichten'}</button>`;
     case 'ready':
       return `${head}

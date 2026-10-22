@@ -140,7 +140,7 @@ test.describe('Logik', () => {
     expect(link.startsWith('org.traccar.client://config?')).toBe(true);
     const q = new URL(link.replace('org.traccar.client://config', 'https://x/')).searchParams;
     expect(q.get('url')).toBe('https://uldwwhedugbygaukjkly.supabase.co/rest/v1/rpc/track?apikey=sb_publishable_k5lTVxYFROnQEBCDw0B4DQ_ZJNpmKcw');
-    expect(Object.fromEntries(q)).toMatchObject({ id: 'ABCDEFGHIJKLMNOPQRSTUVWX', interval: '60', accuracy: 'highest', distance: '0', stop_detection: 'false', buffer: 'true' });
+    expect(Object.fromEntries(q)).toMatchObject({ id: 'ABCDEFGHIJKLMNOPQRSTUVWX', interval: '15', accuracy: 'highest', distance: '0', stop_detection: 'false', buffer: 'true' });
     const svg = qrSvg(link);
     expect(svg).toMatch(/^<svg class="qr"/);
     // ~280 Zeichen → Version 10–12 (57–65 Module) + Rand
@@ -250,6 +250,21 @@ test('Live-Tracking: einrichten per QR/Link, Position + Pace aus Traccar, Sichtu
   await a.getByRole('button', { name: 'Athleten schließen' }).click();
   await expect(a.getByTestId('statusbar')).toContainText('km 6,0');
   await expect(a.getByTestId('statusbar')).toContainText('live');
+
+  // 90 s später, noch keine neue Meldung: echte Position bleibt stehen (kein Vorausschieben,
+  // sonst überholt er sich selbst, wenn er langsamer wird) – „bei dir“ rechnet trotzdem weiter
+  await a.clock.setFixedTime(new Date(T('10:11') + 30_000));
+  await openSection(a, 'Athleten');
+  await expect(row.getByTestId('athlete-status')).toHaveText('Live bei km 6,0');
+  await expect(row.getByTestId('athlete-here')).toContainText('ca. 10:16');
+  // Nach über 2 min ohne Meldung (Funkloch): geschätzt weiter mit Ø 36 km/h → 10:13 bei km 7,8
+  await a.clock.setFixedTime(new Date(T('10:13')));
+  await a.getByRole('button', { name: 'Athleten schließen' }).click();
+  await openSection(a, 'Athleten');
+  await expect(row.getByTestId('athlete-status')).toHaveText('Geschätzt bei km 7,8');
+  await expect(a.getByRole('button', { name: 'Jan jetzt hier' })).toHaveCount(0); // erst nach 5 min wieder
+  await a.getByRole('button', { name: 'Athleten schließen' }).click();
+  await a.clock.setFixedTime(new Date(T('10:10')));
 
   // Zweites Gerät mit dem Link sieht dasselbe und bekommt den Einrichtungslink gleich angezeigt
   const b = await device(browser, info, store, '10:10', { latitude: 53.27, longitude: 10.45 });

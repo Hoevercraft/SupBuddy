@@ -8,10 +8,11 @@ import { latestByAthlete, type Sighting } from './sightings';
 /*
  * Stufe 6: Live-Standort des Athleten.
  *
- * Der Athlet sendet mit der kostenlosen App „Traccar Client“ jede Minute seine Position direkt an
+ * Der Athlet sendet mit der kostenlosen App „Traccar Client“ alle 15 s seine Position direkt an
  * die Datenbank (Funktion `track`, Token im Einrichtungslink). SupBuddy holt die Positionen im
  * selben Takt wie die Sichtungen, rastet sie auf die Strecke ein und rechnet damit:
- *  - Position = letzte Live-Position (Anker), danach geht es mit der gemessenen Pace weiter.
+ *  - Position = letzte Live-Position (Anker); angezeigt wird sie, solange sie höchstens 2 min alt
+ *    ist. Zeiten („bei dir in …“) und alles danach rechnen mit der gemessenen Pace weiter.
  *  - Gemessene Pace = Schnitt der laufenden Disziplin seit ihrem Beginn (nicht das Tempo der
  *    letzten Minuten – das verfälscht z. B. bei Abfahrten). Am Anfang mit der geschätzten Pace
  *    gemischt, bis 2 km gemessen sind. Kommende Disziplinen behalten die geschätzte Pace.
@@ -24,6 +25,14 @@ import { latestByAthlete, type Sighting } from './sightings';
 
 /** Ab so langer Stille gilt das Tracking als „still“ (Sichtung wird wieder angeboten). */
 export const LIVE_STALE_MS = 5 * 60_000;
+/**
+ * So lange zeigt die App die letzte echte Position, statt den Athleten mit der Durchschnitts-
+ * geschwindigkeit weiterzuschieben (sonst überholt er sich selbst und springt zurück, z. B. wenn
+ * er in einer Ortsdurchfahrt langsamer ist). Erst danach wird geschätzt (Funkloch).
+ */
+export const LIVE_HOLD_MS = 2 * 60_000;
+/** Traccar sendet alle so viele Sekunden. */
+export const LIVE_INTERVAL_S = 15;
 /** Weiter weg von der Strecke zählt eine Position nicht (z. B. vor dem Start zu Hause). */
 export const LIVE_SNAP_M = 300;
 /** Erst ab so viel Strecke gilt der Athlet als gestartet. */
@@ -201,13 +210,13 @@ export function correctionsFrom(ev: RaceEvent, sightings: Sighting[], fixes: Map
   return out;
 }
 
-/** Einrichtungslink für Traccar Client: Server, Token, jede Minute, auch im Stand, mit Puffer. */
+/** Einrichtungslink für Traccar Client: Server, Token, alle 15 s, auch im Stand, mit Puffer. */
 export function traccarLink(token: string): string {
   const q = new URLSearchParams({
     url: trackUrl(),
     id: token,
     accuracy: 'highest',
-    interval: '60',
+    interval: String(LIVE_INTERVAL_S),
     distance: '0',
     stop_detection: 'false',
     buffer: 'true',
@@ -231,6 +240,8 @@ export interface LiveView {
   fresh: boolean;
   /** frisch und unterwegs → Sichtung und Pace-Eingabe entfallen */
   active: boolean;
+  /** unterwegs, Position höchstens 2 min alt → echte Position zeigen (nicht weiterschieben) */
+  held: boolean;
 }
 
 /** Live-Positionen eines Events (nur im Speicher; beim Öffnen neu geholt). */
@@ -353,6 +364,7 @@ export class LiveStore {
       fix,
       fresh: !!fix && now - fix.at < LIVE_STALE_MS,
       active: !!fix && !fix.waiting && now - fix.at < LIVE_STALE_MS,
+      held: !!fix && !fix.waiting && now - fix.at < LIVE_HOLD_MS,
     };
   }
 }
