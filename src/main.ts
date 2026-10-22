@@ -4,7 +4,7 @@ import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/800.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
-import { athleteDialogHtml, athletesNow, athletesSection, initials, openAthleteDialog, readAthleteForm, shortStatus } from './athletes-ui';
+import { athleteDialogHtml, athletesNow, athletesSection, initials, openAthleteDialog, readAthleteForm, setLiveShowAt, shortStatus } from './athletes-ui';
 import { courseStats, legDistance, nearestOnCourse, type CourseNearest } from './course';
 import { DETOUR, MODES, type Mode } from './cheer';
 import { isoDate } from './format';
@@ -521,8 +521,18 @@ function bindPick(): void {
 /** Zeitplan-Korrekturen aus Sichtungen und Live-Tracking setzen; true = hat sich spürbar geändert. */
 function applyOffsets(): boolean {
   const today = new Date();
-  const next = event ? correctionsFrom(event, sightings.list, live.fixes(event, today), today) : new Map<string, Correction>();
+  const fixes = event ? live.fixes(event, today) : new Map();
+  const next = event ? correctionsFrom(event, sightings.list, fixes, today) : new Map<string, Correction>();
   setCorrections(next);
+  // Frische Live-Position zeigen statt weiterschieben (außer eine neuere Sichtung ist der Anker)
+  const latest = latestByAthlete(sightings.list);
+  const showAt = new Map<string, number>();
+  for (const a of event?.athletes ?? []) {
+    const lv = a.id ? live.view(event!, a, today.getTime()) : null;
+    const seen = a.id ? latest.get(a.id) : undefined;
+    if (lv?.held && lv.fix && (!seen || seen.seenAt <= lv.fix.at)) showAt.set(a.id!, lv.fix.at);
+  }
+  setLiveShowAt(showAt);
   const keys = new Set([...next.keys(), ...lastCorrections.keys()]);
   const changed = [...keys].some((k) => {
     const a = next.get(k);
@@ -990,8 +1000,11 @@ window.setInterval(() => {
   if (document.visibilityState !== 'visible') return;
   void eventSync.refresh();
   if (event?.athletes.length) void sightings.refresh();
-  void live.refresh();
 }, 20_000);
+// Live-Positionen im Takt der Tracker-App (alle 15 s)
+window.setInterval(() => {
+  if (document.visibilityState === 'visible') void live.refresh();
+}, 15_000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   void eventSync.refresh();

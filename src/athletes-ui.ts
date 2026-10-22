@@ -47,7 +47,7 @@ const BASIS: Record<Basis, string> = { plan: 'Laut Plan', sighting: 'Nach Sichtu
 /** Live-Daten bzw. Sichtung: was ist der Anker für den Zeitplan? */
 export function basisOf(lv: LiveView | undefined, seen: Sighting | undefined): Basis {
   const fix = lv?.fix;
-  if (fix && (!seen || seen.seenAt <= fix.at)) return lv!.fresh ? 'live' : 'live-stale';
+  if (fix && (!seen || seen.seenAt <= fix.at)) return lv!.fresh && (fix.waiting || lv!.held) ? 'live' : 'live-stale';
   return seen ? 'sighting' : 'plan';
 }
 
@@ -95,7 +95,7 @@ export function shortStatus(ev: RaceEvent, athlete: Athlete, plan: PlanState, po
   // Woher die Zeit kommt: Live-Tracking, Sichtung oder nur der Plan
   if (lv?.fix && (seenAt === undefined || seenAt <= lv.fix.at)) {
     if (lv.fresh && lv.fix.waiting && plan.state === 'unterwegs') return 'wartet am Start · live';
-    return lv.fresh ? `${s} · live` : `${s} · zuletzt live ${clock(lv.fix.at)}`;
+    return lv.held || (lv.fresh && lv.fix.waiting) ? `${s} · live` : `${s} · zuletzt live ${clock(lv.fix.at)}`;
   }
   return seenAt === undefined ? s : `${s} · gesichtet ${clock(seenAt)}`;
 }
@@ -125,9 +125,22 @@ export interface AthleteNow {
   plan: PlanState;
 }
 
+/**
+ * Bis wann (ms) die Position eines Athleten angezeigt wird: frische Live-Position → genau dort,
+ * nicht mit der Durchschnittsgeschwindigkeit weitergeschoben. Wird zentral gesetzt (main.ts).
+ */
+const showAt = new Map<string, number>();
+export function setLiveShowAt(next: Map<string, number>): void {
+  showAt.clear();
+  for (const [k, v] of next) showAt.set(k, v);
+}
+
 export function athletesNow(ev: RaceEvent, now: number): AthleteNow[] {
   const today = new Date(now);
-  return ev.athletes.map((athlete) => ({ athlete, plan: planAt(ev, timeline(ev, athlete, today), now) }));
+  return ev.athletes.map((athlete) => {
+    const held = athlete.id ? showAt.get(athlete.id) : undefined;
+    return { athlete, plan: planAt(ev, timeline(ev, athlete, today), held !== undefined ? Math.min(now, held) : now) };
+  });
 }
 
 export interface SightingView {
