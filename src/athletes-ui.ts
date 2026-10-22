@@ -13,6 +13,8 @@ import {
 } from './model';
 import { planAt, timeAtAlong, timeline, type PlanState } from './schedule';
 import type { Sighting, SyncState } from './sightings';
+import type { LiveView } from './live';
+import { liveLine } from './live-ui';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -38,8 +40,19 @@ function needsTransition(ev: RaceEvent): boolean {
 
 // ---------------------------------------------------------------- Status-Texte
 
-function statusText(ev: RaceEvent, plan: PlanState, now: number, sighted = false): string {
-  const basis = sighted ? 'Nach Sichtung' : 'Laut Plan';
+/** Woher die Angabe kommt. */
+export type Basis = 'plan' | 'sighting' | 'live' | 'live-stale';
+const BASIS: Record<Basis, string> = { plan: 'Laut Plan', sighting: 'Nach Sichtung', live: 'Live', 'live-stale': 'Geschätzt' };
+
+/** Live-Daten bzw. Sichtung: was ist der Anker für den Zeitplan? */
+export function basisOf(lv: LiveView | undefined, seen: Sighting | undefined): Basis {
+  const fix = lv?.fix;
+  if (fix && (!seen || seen.seenAt <= fix.at)) return lv!.fresh ? 'live' : 'live-stale';
+  return seen ? 'sighting' : 'plan';
+}
+
+function statusText(ev: RaceEvent, plan: PlanState, now: number, basisKind: Basis = 'plan'): string {
+  const basis = BASIS[basisKind];
   switch (plan.state) {
     case 'vor-start': {
       const sameDay = isoDate(new Date(plan.start)) === isoDate(new Date(now));
@@ -72,9 +85,12 @@ function hereText(ev: RaceEvent, athlete: Athlete, position: Point, now: number,
 }
 
 /** Kurzstatus für die Leiste unten: „km 12,3 · bei dir in 20 min“. */
-export function shortStatus(ev: RaceEvent, athlete: Athlete, plan: PlanState, position: Point | null, now: number, seenAt?: number): string {
+export function shortStatus(ev: RaceEvent, athlete: Athlete, plan: PlanState, position: Point | null, now: number, seenAt?: number, lv?: LiveView): string {
   const s = shortStatusPlain(ev, athlete, plan, position, now);
-  // Woher die Zeit kommt: aus einer Sichtung oder nur aus dem Plan
+  // Woher die Zeit kommt: Live-Tracking, Sichtung oder nur der Plan
+  if (lv?.fix && (seenAt === undefined || seenAt <= lv.fix.at)) {
+    return lv.fresh ? `${s} · live` : `${s} · zuletzt live ${clock(lv.fix.at)}`;
+  }
   return seenAt === undefined ? s : `${s} · gesichtet ${clock(seenAt)}`;
 }
 
@@ -114,6 +130,8 @@ export interface SightingView {
   /** eigener Standort liegt an der Strecke → „Jetzt hier“ möglich */
   atCourse: boolean;
   sync: SyncState;
+  /** Live-Tracking je Athleten-Kennung */
+  live?: Map<string, LiveView>;
 }
 
 function sightingLine(s: Sighting): string {
@@ -129,8 +147,11 @@ export function athletesSection(ev: RaceEvent, position: Point | null, now: numb
     .map(({ athlete, plan }, i) => {
       const here = position ? hereText(ev, athlete, position, now, today) : '';
       const seen = athlete.id ? sv?.latest.get(athlete.id) : undefined;
+      const lv = athlete.id ? sv?.live?.get(athlete.id) : undefined;
+      const live = lv ? liveLine(lv, now) : '';
+      // Frische Live-Daten: Sichten unnötig
       const sightBtn =
-        sv?.atCourse && plan.state !== 'im-ziel'
+        sv?.atCourse && plan.state !== 'im-ziel' && !lv?.fresh
           ? `<button type="button" class="btn btn-small sight-btn" data-sight="${i}">${esc(athlete.name)} jetzt hier</button>`
           : '';
       return `
@@ -138,7 +159,8 @@ export function athletesSection(ev: RaceEvent, position: Point | null, now: numb
         <span class="athlete-dot" aria-hidden="true">${esc(initials(athlete.name))}</span>
         <div class="athlete-main">
           <div class="athlete-name">${esc(athlete.name)}</div>
-          <div class="athlete-status" data-testid="athlete-status">${esc(statusText(ev, plan, now, !!seen))}</div>
+          <div class="athlete-status" data-testid="athlete-status">${esc(statusText(ev, plan, now, basisOf(lv, seen)))}</div>
+          ${live ? `<div class="athlete-live${lv?.fresh ? ' is-fresh' : ''}" data-testid="athlete-live">${esc(live)}</div>` : ''}
           ${seen ? sightingLine(seen) : ''}
           ${here ? `<div class="athlete-here" data-testid="athlete-here">${esc(here)}</div>` : ''}
           ${sightBtn}
@@ -211,18 +233,20 @@ export function athleteDialogHtml(): string {
           <span>Wechsel</span>
           <span class="with-unit"><input name="transition" inputmode="decimal" aria-label="Wechselzeit in Minuten" placeholder="3" /> min je Wechsel</span>
         </label>
+        <p class="hint" id="pace-live-note" data-testid="pace-live-note" hidden>Tempo kommt gerade aus dem Live-Tracking.</p>
         <p class="form-error" id="athlete-error" role="alert" hidden></p>
         <div class="actions">
           <button class="btn btn-primary" type="submit">Speichern</button>
           <button class="btn" type="button" id="athlete-cancel">Abbrechen</button>
         </div>
+        <section class="live-setup" id="live-setup" data-testid="live-setup"></section>
         <button class="btn btn-quiet btn-danger" type="button" id="athlete-delete" hidden>Athlet entfernen</button>
       </form>
     </dialog>`;
 }
 
-/** Füllt und öffnet den Dialog. index = null → neuer Athlet. */
-export function openAthleteDialog(dialog: HTMLDialogElement, ev: RaceEvent, index: number | null): void {
+/** Füllt und öffnet den Dialog. index = null → neuer Athlet. liveActive = Tempo kommt aus dem Live-Tracking. */
+export function openAthleteDialog(dialog: HTMLDialogElement, ev: RaceEvent, index: number | null, liveActive = false): void {
   const form = dialog.querySelector<HTMLFormElement>('#athlete-form')!;
   const a = index != null ? ev.athletes[index] : null;
   const template = a ?? ev.athletes[ev.athletes.length - 1];
@@ -246,8 +270,10 @@ export function openAthleteDialog(dialog: HTMLDialogElement, ev: RaceEvent, inde
   const present = disciplinesIn(ev);
   for (const el of Array.from(form.querySelectorAll<HTMLElement>('[data-discipline]'))) {
     const d = el.dataset.discipline as Discipline;
-    el.hidden = d === 'wechsel' ? !needsTransition(ev) : !present.has(d);
+    // Mit frischen Live-Daten braucht es kein geschätztes Tempo (Werte bleiben gespeichert)
+    el.hidden = d === 'wechsel' ? !needsTransition(ev) : !present.has(d) || liveActive;
   }
+  (dialog.querySelector('#pace-live-note') as HTMLElement).hidden = !liveActive;
   dialog.showModal();
   if (!a) (form.elements.namedItem('name') as HTMLInputElement).focus();
 }

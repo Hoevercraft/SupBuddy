@@ -248,9 +248,25 @@ export interface BackendStore {
   events: Map<string, { data: string; version: number; raceDate?: string | null; expired?: boolean }>;
   /** Event-Funktionen fehlen auf dem Server (SQL noch nicht ausgeführt) */
   eventsMissing?: boolean;
+  /** Live-Tracking (Stufe 6) */
+  trackers: { event: string; athlete: string; token: string }[];
+  positions: { event: string; athlete: string; at: string; lat: number; lon: number; acc: number | null; v: number | null; received: number }[];
 }
 
-export const newBackendStore = (): BackendStore => ({ rows: [], status: 200, users: 0, calls: [], events: new Map() });
+export const newBackendStore = (): BackendStore => ({ rows: [], status: 200, users: 0, calls: [], events: new Map(), trackers: [], positions: [] });
+
+/**
+ * Wie Traccar Client: eine Position mit dem Token senden (Regeln wie public.track –
+ * unbekanntes Token wird still verworfen, doppelte Zeitpunkte auch).
+ */
+export function traccarSend(store: BackendStore, token: string, lat: number, lon: number, at: number, received = Date.now()): boolean {
+  const t = store.trackers.find((x) => x.token === token);
+  if (!t) return false;
+  const iso = new Date(at).toISOString();
+  if (store.positions.some((p) => p.event === t.event && p.athlete === t.athlete && p.at === iso)) return false;
+  store.positions.push({ event: t.event, athlete: t.athlete, at: iso, lat, lon, acc: 4, v: null, received });
+  return true;
+}
 
 const backendMocked = new WeakSet<Page>();
 
@@ -316,6 +332,35 @@ export async function mockBackend(page: Page, store: BackendStore = newBackendSt
         if (e.version !== body.p_base_version) return json(409, { code: 'PT409', message: 'Konflikt' });
         store.events.set(body.p_event, { data: body.p_data, version: e.version + 1, raceDate: body.p_race_date });
         return json(200, e.version + 1);
+      }
+      case '/rest/v1/rpc/create_tracker': {
+        const e = store.events.get(body.p_event);
+        if (!e || e.expired) return json(400, { code: '22023', message: 'Ungültiges Event' });
+        let t = store.trackers.find((x) => x.event === body.p_event && x.athlete === body.p_athlete);
+        if (!t) {
+          t = { event: body.p_event, athlete: body.p_athlete, token: `tok-${body.p_athlete}-${store.trackers.length + 1}`.padEnd(24, 'x') };
+          store.trackers.push(t);
+        }
+        return json(200, t.token);
+      }
+      case '/rest/v1/rpc/delete_tracker': {
+        const before = store.trackers.length;
+        store.trackers = store.trackers.filter((x) => !(x.event === body.p_event && x.athlete === body.p_athlete));
+        store.positions = store.positions.filter((x) => !(x.event === body.p_event && x.athlete === body.p_athlete));
+        return json(200, store.trackers.length < before);
+      }
+      case '/rest/v1/rpc/get_live': {
+        const e = store.events.get(body.p_event);
+        const now = Date.now();
+        if (!e || e.expired) return json(200, { trackers: [], positions: [], now: new Date(now).toISOString() });
+        const since = body.p_since ? Date.parse(body.p_since) : -Infinity;
+        return json(200, {
+          trackers: store.trackers.filter((x) => x.event === body.p_event).map((x) => x.athlete),
+          positions: store.positions
+            .filter((p) => p.event === body.p_event && p.received > since)
+            .map((p) => ({ a: p.athlete, t: p.at, lat: p.lat, lon: p.lon, acc: p.acc, v: p.v })),
+          now: new Date(now).toISOString(),
+        });
       }
       case '/rest/v1/rpc/delete_sighting': {
         const before = store.rows.length;

@@ -36,18 +36,33 @@ export interface Timeline {
 }
 
 /**
- * Korrektur je Athlet aus Sichtungen (ms, + = später als geplant), über die Athleten-Kennung.
- * Wird zentral gesetzt (siehe sightings.ts), damit alle Anzeigen und der Plan sie nutzen.
+ * Korrektur je Athlet (über die Athleten-Kennung): Verschiebung des Zeitplans (ms, + = später
+ * als geplant) aus der jüngsten Sichtung bzw. Live-Position, dazu ggf. gemessene
+ * Geschwindigkeiten je Disziplin (m/s) aus dem Live-Tracking.
+ * Wird zentral gesetzt (siehe sightings.ts / live.ts), damit alle Anzeigen und der Plan sie nutzen.
  */
-const sightingOffsets = new Map<string, number>();
+export interface Correction {
+  offset: number;
+  speeds?: Partial<Record<Discipline, number>>;
+}
+const corrections = new Map<string, Correction>();
 
+export function setCorrections(next: Map<string, Correction>): void {
+  corrections.clear();
+  for (const [k, v] of next) corrections.set(k, v);
+}
+
+/** Nur Verschiebungen (Sichtungen ohne Live-Tracking). */
 export function setSightingOffsets(offsets: Map<string, number>): void {
-  sightingOffsets.clear();
-  for (const [k, v] of offsets) sightingOffsets.set(k, v);
+  setCorrections(new Map([...offsets].map(([k, offset]) => [k, { offset }])));
+}
+
+export function correction(athlete: Athlete): Correction | null {
+  return athlete.id ? (corrections.get(athlete.id) ?? null) : null;
 }
 
 export function sightingOffset(athlete: Athlete): number {
-  return athlete.id ? (sightingOffsets.get(athlete.id) ?? 0) : 0;
+  return correction(athlete)?.offset ?? 0;
 }
 
 /** Startzeitpunkt (ms) aus Renntag und "HH:MM" in Ortszeit des Geräts. */
@@ -58,9 +73,14 @@ export function startTime(ev: RaceEvent, athlete: Athlete, today: Date): number 
   return base.getTime();
 }
 
-/** Zeitplan des Athleten; mit Korrektur aus der letzten Sichtung (raw = ohne). */
+/** Zeitplan des Athleten; mit Korrektur aus Sichtung/Live-Tracking (raw = ohne). */
 export function timeline(ev: RaceEvent, athlete: Athlete, today: Date, raw = false): Timeline {
-  const start = startTime(ev, athlete, today) + (raw ? 0 : sightingOffset(athlete));
+  return buildTimeline(ev, athlete, today, raw ? null : correction(athlete));
+}
+
+/** Zeitplan mit einer bestimmten Korrektur (null = reiner Plan). */
+export function buildTimeline(ev: RaceEvent, athlete: Athlete, today: Date, corr: Correction | null): Timeline {
+  const start = startTime(ev, athlete, today) + (corr?.offset ?? 0);
   const segments: Segment[] = [];
   let t = start;
   let offset = 0;
@@ -71,7 +91,7 @@ export function timeline(ev: RaceEvent, athlete: Athlete, today: Date, raw = fal
       t += athlete.transition * 1000;
     }
     const length = legDistance(leg);
-    const v = speed(athlete, leg.discipline);
+    const v = leg.discipline === 'wechsel' ? null : (corr?.speeds?.[leg.discipline] ?? speed(athlete, leg.discipline));
     const duration = v ? (length / v) * 1000 : athlete.transition * 1000;
     segments.push({ kind: 'leg', legIndex: i, t0: t, t1: t + duration, offset, length });
     t += duration;

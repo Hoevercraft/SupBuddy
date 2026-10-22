@@ -139,6 +139,8 @@ export interface AthleteMarker {
   color: string;
   /** null = nicht auf der Strecke (vor dem Start oder im Ziel) */
   point: Point | null;
+  /** Position aus frischen Live-Daten (statt laut Plan) */
+  live?: boolean;
 }
 
 function athleteElement(a: AthleteMarker): HTMLElement {
@@ -149,8 +151,13 @@ function athleteElement(a: AthleteMarker): HTMLElement {
   el.innerHTML = '<span class="athlete-pin-dot"></span><span class="athlete-pin-name"></span>';
   el.querySelector('.athlete-pin-dot')!.textContent = a.label;
   el.querySelector('.athlete-pin-name')!.textContent = a.name;
-  el.title = `${a.name} – Position laut Plan`;
+  setPinLive(el, !!a.live, a.name);
   return el;
+}
+
+function setPinLive(el: HTMLElement, live: boolean, name: string): void {
+  el.classList.toggle('is-live', live);
+  el.title = live ? `${name} – live` : `${name} – Position laut Plan`;
 }
 
 /**
@@ -648,6 +655,7 @@ export class CourseMap {
       } else {
         m.setLngLat([a.point.lng, a.point.lat]);
       }
+      setPinLive(m.getElement(), !!a.live, a.name);
     }
     for (const [key, m] of this.athletePins) {
       if (!keep.has(key)) {

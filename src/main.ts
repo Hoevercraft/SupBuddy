@@ -21,8 +21,10 @@ import { decodeEvent, normalizeLeg, shareUrl, tokenFromHash } from './share';
 import { loadEvent, loadLastLink, saveEvent, saveLastLink } from './store';
 import { adoptIds, randomId, withIds } from './ids';
 import { EventSync, isShared } from './eventsync';
-import { setSightingOffsets } from './schedule';
-import { alongsNear, latestByAthlete, offsetsFrom, sightingAlong, SightingStore } from './sightings';
+import { setCorrections, type Correction } from './schedule';
+import { alongsNear, latestByAthlete, sightingAlong, SightingStore } from './sightings';
+import { correctionsFrom, LiveStore, traccarLink, type LiveView } from './live';
+import { liveSetupHtml, type LiveSetup } from './live-ui';
 
 export const APP_VERSION = __APP_VERSION__;
 /** Zum Troubleshooting: ändert sich mit jedem Deploy. */
@@ -46,9 +48,15 @@ let pick: { n: CourseNearest; route: Route | null; journey?: Journey; arrive: nu
 const pickEl = document.createElement('div');
 /** Sichtungen des aktuellen Events (geteilt über Supabase) */
 const sightings = new SightingStore(onSightingsChange);
-let lastOffsets = new Map<string, number>();
+let lastCorrections = new Map<string, Correction>();
+/** Live-Standorte der Athleten (Stufe 6, Traccar Client) */
+const live = new LiveStore(onLiveChange);
+/** Einrichtungs-Token je Athlet (nur im Speicher; jedes Gerät mit dem Link bekommt dasselbe) */
+const liveTokens = new Map<string, string>();
+let liveBusy = false;
 /** Ganzes Event live für alle mit dem Link (Stufe 5b) */
 const eventSync = new EventSync(applyRemoteEvent, () => {
+  live.setEvent(liveEventId());
   renderStatus();
   if (section === 'strecke') renderSheetUnlessTyping();
 });
@@ -164,13 +172,14 @@ function renderStatus(): void {
   const now = Date.now();
   const items = athletesNow(event, now);
   const seen = latestByAthlete(sightings.list);
+  const lv = liveViews(now);
   bar.setAttribute('aria-label', 'Athleten öffnen');
   bar.innerHTML = items.length
     ? `<ul class="status-list">${items
         .slice(0, 3)
         .map(
           ({ athlete, plan: p }) =>
-            `<li style="--athlete-color:${athlete.color}"><span class="status-dot" aria-hidden="true">${esc(initials(athlete.name))}</span><span class="status-name">${esc(athlete.name)}</span> <span class="status-text">${esc(shortStatus(event!, athlete, p, position, now, athlete.id ? seen.get(athlete.id)?.seenAt : undefined))}</span></li>`,
+            `<li style="--athlete-color:${athlete.color}"><span class="status-dot" aria-hidden="true">${esc(initials(athlete.name))}</span><span class="status-name">${esc(athlete.name)}</span> <span class="status-text">${esc(shortStatus(event!, athlete, p, position, now, athlete.id ? seen.get(athlete.id)?.seenAt : undefined, lv.get(athlete.id ?? '')))}</span></li>`,
         )
         .join('')}${items.length > 3 ? `<li class="status-more">+${items.length - 3} weitere</li>` : ''}</ul>`
     : '<span class="status-empty">Noch keine Athleten – hier tippen zum Eintragen</span>';
@@ -185,7 +194,10 @@ function renderStatus(): void {
 /** Bereich öffnen/schließen (null = alle zu). */
 function setSection(s: Section | null): void {
   section = event ? s : null;
-  if (section === 'athleten') void sightings.refresh();
+  if (section === 'athleten') {
+    void sightings.refresh();
+    void live.refresh();
+  }
   if (section && mapOnly) setMapOnly(false);
   document.body.dataset.section = section ?? '';
   courseMap?.setSection(section);
@@ -235,6 +247,7 @@ function renderSheet(): void {
           latest: latestByAthlete(sightings.list),
           atCourse: !!position && alongsNear(event, position).length > 0,
           sync: sightings.state,
+          live: liveViews(Date.now()),
         })}`
       : section === 'plan'
         ? `${planSection(event, { settings: currentPlanSettings(), plan, busy: planBusy, fromPosition: !!position, now: Date.now() })}
@@ -285,8 +298,10 @@ function setMapOnly(on: boolean): void {
 
 /** Athleten-Marker an ihre Plan-Position setzen. */
 function renderAthleteMarkers(): void {
+  const lv = liveViews(Date.now());
   const items = event
     ? athletesNow(event, Date.now()).map(({ athlete, plan }) => ({
+        live: !!lv.get(athlete.id ?? '')?.fresh,
         label: initials(athlete.name),
         name: athlete.name,
         color: athlete.color,
@@ -501,14 +516,92 @@ function bindPick(): void {
 
 // ---------------------------------------------------------------- Sichtungen
 
-/** Zeitplan-Korrekturen aus den Sichtungen setzen; true = hat sich spürbar geändert. */
+/** Zeitplan-Korrekturen aus Sichtungen und Live-Tracking setzen; true = hat sich spürbar geändert. */
 function applyOffsets(): boolean {
-  const next = event ? offsetsFrom(event, sightings.list, new Date()) : new Map<string, number>();
-  setSightingOffsets(next);
-  const keys = new Set([...next.keys(), ...lastOffsets.keys()]);
-  const changed = [...keys].some((k) => Math.abs((next.get(k) ?? 0) - (lastOffsets.get(k) ?? 0)) > 60_000);
-  lastOffsets = next;
+  const today = new Date();
+  const next = event ? correctionsFrom(event, sightings.list, live.fixes(event, today), today) : new Map<string, Correction>();
+  setCorrections(next);
+  const keys = new Set([...next.keys(), ...lastCorrections.keys()]);
+  const changed = [...keys].some((k) => {
+    const a = next.get(k);
+    const b = lastCorrections.get(k);
+    return Math.abs((a?.offset ?? 0) - (b?.offset ?? 0)) > 60_000 || JSON.stringify(a?.speeds ?? {}) !== JSON.stringify(b?.speeds ?? {});
+  });
+  lastCorrections = next;
   return changed;
+}
+
+// ---------------------------------------------------------------- Live-Tracking
+
+/** Live-Stand nur für geteilte Events mit Athleten (vorher gibt es dafür nichts auf dem Server). */
+function liveEventId(): string | null {
+  return event?.id && event.athletes.length && isShared(event.id) && eventSync.state !== 'expired' ? event.id : null;
+}
+
+function liveViews(now: number): Map<string, LiveView> {
+  const out = new Map<string, LiveView>();
+  for (const a of event?.athletes ?? []) if (a.id) out.set(a.id, live.view(event!, a, now));
+  return out;
+}
+
+function onLiveChange(): void {
+  const changed = applyOffsets();
+  renderAthleteMarkers();
+  renderStatus();
+  if (changed) renderSheet();
+  else renderSheetUnlessTyping();
+  if (changed && plan && !planBusy) void createPlan();
+  renderLiveSetup();
+  document.body.dataset.live = String([...live.points.values()].reduce((n, l) => n + l.length, 0));
+}
+
+/** Abschnitt „Live-Tracking“ im offenen Athleten-Dialog. */
+function renderLiveSetup(): void {
+  const dialog = $<HTMLDialogElement>('#athlete-dialog');
+  const box = $('#live-setup');
+  const idx = dialog.dataset.index;
+  const a = idx ? event?.athletes[Number(idx)] : undefined;
+  let s: LiveSetup;
+  if (!a?.id) s = { kind: 'new' };
+  else if (!liveEventId()) s = { kind: 'not-shared' };
+  else if (liveTokens.has(a.id)) s = { kind: 'ready', name: a.name, link: traccarLink(liveTokens.get(a.id)!) };
+  else {
+    s = { kind: 'idle', busy: liveBusy };
+    // Schon eingerichtet (z. B. auf einem anderen Gerät): Link gleich zeigen
+    if (live.trackers.has(a.id) && !liveBusy && dialog.open) void setupLive(a.id, true);
+  }
+  const html = liveSetupHtml(s);
+  if (box.dataset.html !== html) {
+    box.innerHTML = html;
+    box.dataset.html = html;
+  }
+  box.hidden = !html;
+}
+
+async function setupLive(athleteId: string, quiet = false): Promise<void> {
+  if (liveBusy) return;
+  liveBusy = true;
+  renderLiveSetup();
+  try {
+    liveTokens.set(athleteId, await live.create(athleteId));
+  } catch {
+    if (!quiet) toast('Live-Tracking konnte nicht eingerichtet werden. Bist du online? Versuch es gleich nochmal.', 'error');
+  } finally {
+    liveBusy = false;
+    renderLiveSetup();
+  }
+}
+
+async function stopLive(athleteId: string): Promise<boolean> {
+  try {
+    await live.remove(athleteId);
+    liveTokens.delete(athleteId);
+    renderLiveSetup();
+    return true;
+  } catch {
+    toast('Live-Tracking konnte nicht beendet werden. Bist du online?', 'error');
+    return false;
+  }
 }
 
 function onSightingsChange(): void {
@@ -551,6 +644,7 @@ async function setEvent(ev: RaceEvent | null, fit = true, remote = false): Promi
   event = ev && ev.legs.length > 0 ? withIds(ev) : null;
   eventSync.update(event, !remote);
   sightings.setEvent(event?.athletes.length ? (event.id ?? null) : null);
+  live.setEvent(liveEventId());
   applyOffsets();
   if (!event) section = null;
   render(fit);
@@ -588,7 +682,8 @@ async function importFiles(files: FileList): Promise<void> {
 async function openShare(): Promise<void> {
   if (!event) return;
   // Ab jetzt live: Änderungen sehen alle, die den Link haben
-  void eventSync.share(event);
+  const ev = event;
+  void eventSync.share(event).then(() => event === ev && live.setEvent(liveEventId()));
   const base = new URL(import.meta.env.BASE_URL, location.origin).toString();
   const url = await shareUrl(event, base);
   const dialog = $<HTMLDialogElement>('#share-dialog');
@@ -645,10 +740,14 @@ function bindEvents(): void {
       const stop = plan.stops[i];
       const from = i === 0 ? plan.start : plan.stops[i - 1].candidate.point;
       if (stop) courseMap?.fitPoints([from, ...stop.route.points]);
-    } else if (t.closest('#btn-add-athlete') && event) openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, null);
-    else if (t.closest('.athlete-edit') && event) {
+    } else if (t.closest('#btn-add-athlete') && event) {
+      openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, null);
+      renderLiveSetup();
+    } else if (t.closest('.athlete-edit') && event) {
       const i = Number((t.closest('.athlete-edit') as HTMLElement).dataset.index);
-      openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, i);
+      const a = event.athletes[i];
+      openAthleteDialog($<HTMLDialogElement>('#athlete-dialog'), event, i, !!a && live.view(event, a, Date.now()).fresh);
+      renderLiveSetup();
     }
     else if (t.closest('#btn-reset')) {
       if (confirm('Aktuelle Strecke verwerfen und ein anderes Rennen laden?')) await setEvent(null);
@@ -746,10 +845,33 @@ function bindEvents(): void {
     toast(idx ? `${result.name} gespeichert.` : `${result.name} hinzugefügt.`);
   });
   $('#athlete-cancel').addEventListener('click', () => athleteDialog.close());
+  // Während der Dialog offen war, kam evtl. Neues (Live-Tracking, Abgleich) → jetzt zeigen
+  athleteDialog.addEventListener('close', () => renderSheetUnlessTyping());
+  $('#live-setup').addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement;
+    const a = event?.athletes[Number(athleteDialog.dataset.index)];
+    if (!a?.id || !athleteDialog.dataset.index) return;
+    if (t.closest('#live-create')) await setupLive(a.id);
+    else if (t.closest('#live-copy')) {
+      const link = traccarLink(liveTokens.get(a.id) ?? '');
+      try {
+        await navigator.clipboard.writeText(link);
+        toast('Link kopiert – auf dem Handy des Athleten öffnen.');
+      } catch {
+        toast('Kopieren ging nicht. Scanne den QR-Code oder tippe „In Traccar öffnen“.', 'error');
+      }
+    } else if (t.closest('#live-delete')) {
+      if (!confirm(`Live-Tracking für ${a.name} beenden? Die gesendeten Positionen werden gelöscht.`)) return;
+      if (await stopLive(a.id)) toast(`Live-Tracking für ${a.name} beendet.`);
+    }
+  });
   $('#athlete-delete').addEventListener('click', async () => {
     const idx = athleteDialog.dataset.index;
     if (!event || !idx) return;
     const name = event.athletes[Number(idx)].name;
+    // Entfernt → auch nicht mehr verfolgen
+    const id = event.athletes[Number(idx)].id;
+    if (id && live.trackers.has(id)) await stopLive(id);
     athleteDialog.close();
     await setEvent({ ...event, athletes: event.athletes.filter((_, j) => j !== Number(idx)) }, false);
     toast(`${name} entfernt.`);
@@ -766,7 +888,10 @@ async function loadFromHash(): Promise<boolean> {
     await setEvent(await decodeEvent(token));
     saveLastLink(token, BUILD_LABEL);
     // Link geöffnet → den aktuellen Stand vom Server holen (der Link kann älter sein)
-    if (event) void eventSync.share(event);
+    if (event) {
+      const ev = event;
+      void eventSync.share(event).then(() => event === ev && live.setEvent(liveEventId()));
+    }
     toast('Strecke aus dem Link geladen.');
     return true;
   } catch {
@@ -847,9 +972,10 @@ async function start(): Promise<void> {
     }
     if (event !== loaded) await saveEvent(event);
     sightings.setEvent(event?.athletes.length ? (event.id ?? null) : null);
+    eventSync.update(event, false);
+    live.setEvent(liveEventId());
     applyOffsets();
     render(true);
-    eventSync.update(event, false);
     void eventSync.refresh();
   }
   document.body.dataset.ready = 'true';
@@ -862,10 +988,12 @@ window.setInterval(() => {
   if (document.visibilityState !== 'visible') return;
   void eventSync.refresh();
   if (event?.athletes.length) void sightings.refresh();
+  void live.refresh();
 }, 20_000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   void eventSync.refresh();
   if (event?.athletes.length) void sightings.refresh();
+  void live.refresh();
 });
 registerSW({ immediate: true });

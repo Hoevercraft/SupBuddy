@@ -72,7 +72,7 @@ export function bounds(points: Point[]): Bounds | null {
 }
 
 /** Lokale Projektion in Metern relativ zu einem Referenzpunkt (für kurze Distanzen genau genug). */
-function project(p: Point, ref: Point): [number, number] {
+export function project(p: Point, ref: Point): [number, number] {
   const x = toRad(p.lng - ref.lng) * Math.cos(toRad(ref.lat)) * R;
   const y = toRad(p.lat - ref.lat) * R;
   return [x, y];
