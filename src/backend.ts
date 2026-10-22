@@ -200,3 +200,44 @@ export async function putEvent(eventId: string, data: string, baseVersion: numbe
     throw e;
   }
 }
+
+// ---------------------------------------------------------------- Live-Tracking (Stufe 6)
+
+export interface RemotePosition {
+  /** Athleten-Kennung */
+  a: string;
+  /** Zeitpunkt der Messung (ISO) */
+  t: string;
+  lat: number;
+  lon: number;
+  /** Genauigkeit in m */
+  acc: number | null;
+  /** Geschwindigkeit in m/s */
+  v: number | null;
+}
+
+export interface RemoteLive {
+  /** Athleten mit eingerichtetem Tracking */
+  trackers: string[];
+  positions: RemotePosition[];
+  /** Serverzeit der Antwort (für den nächsten Abruf „seit“) */
+  now: string;
+}
+
+/** Live-Stand eines Events; since = nur Positionen, die danach empfangen wurden. */
+export const fetchLive = (eventId: string, since: string | null) =>
+  rpc<RemoteLive>('get_live', { p_event: eventId, p_since: since });
+
+/** Tracking für einen Athleten einrichten (gibt es schon eins: dasselbe Token). */
+export const createTracker = (eventId: string, athleteId: string) =>
+  rpc<string>('create_tracker', { p_event: eventId, p_athlete: athleteId });
+
+/** Tracking beenden: Token ungültig, Positionen gelöscht. */
+export const deleteTracker = (eventId: string, athleteId: string) =>
+  rpc<boolean>('delete_tracker', { p_event: eventId, p_athlete: athleteId });
+
+/**
+ * Adresse, an die Traccar Client sendet (direkt die Datenbankfunktion `track`).
+ * Bewusst die echte Adresse, auch in Tests: sie landet nur im Einrichtungslink.
+ */
+export const trackUrl = () => `${SUPABASE_URL}/rest/v1/rpc/track?apikey=${SUPABASE_KEY}`;
