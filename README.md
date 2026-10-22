@@ -37,7 +37,8 @@ Kommt ein Athlet an dir vorbei, tippe **„… jetzt hier“** (geht bis 150 m n
 Der Athlet kann seine Position live senden – mit der kostenlosen App **Traccar Client** (iPhone und Android):
 1. Athleten bearbeiten → **„Live-Tracking einrichten“** (geht, sobald das Event geteilt ist).
 2. Der Athlet installiert Traccar Client und scannt den QR-Code bzw. tippt **„In Traccar öffnen“**.
-3. Standortberechtigung **„Immer“** und **„Genauer Standort“** erlauben, Tracking einschalten.
+3. Standortberechtigung **„Immer“** und **„Genauer Standort“** erlauben, in Traccar **„Kontinuierliche Standortverfolgung“** aktivieren und das Tracking einschalten.
+4. Nach dem Rennen in Traccar das Tracking ausschalten und die **„Kontinuierliche Standortverfolgung“** wieder deaktivieren. Dann sendet das Handy keine Daten mehr – du behältst die Kontrolle.
 
 Gesendet wird nur am Renntag. Mit Live-Tracking zeigt SupBuddy die echte Position (grüner Ring am Marker) statt der Schätzung.
 
