@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  # Nur für „sich selbst wieder aktivieren“ (siehe unten)
+  actions: write
 
 jobs:
   ping:
@@ -22,3 +24,12 @@ jobs:
             https://uldwwhedugbygaukjkly.supabase.co/rest/v1/rpc/ping)
           cat /tmp/out.txt; echo
           test "$code" = "200"
+      # GitHub schaltet geplante Workflows in öffentlichen Repos nach 60 Tagen ohne Commit ab.
+      # Über die offizielle Schnittstelle wieder aktivieren (keine Schein-Commits). Ob das die
+      # Frist zurücksetzt, ist nicht dokumentiert – schadet aber nicht. Fehler hier ignorieren.
+      - name: Workflow aktiv halten
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable keepalive.yml --repo "$GITHUB_REPOSITORY"
