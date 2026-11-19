@@ -8,10 +8,12 @@ on:
     - cron: '23 5 * * *'
   workflow_dispatch:
 
+# GitHub schaltet geplante Workflows in öffentlichen Repos nach 60 Tagen ohne Aktivität ab.
+# Das umgehen wir bewusst nicht (Actions-Bedingungen). Kommt die Mail von GitHub, den Workflow
+# unter Actions → „Supabase wach halten“ → „Enable workflow“ von Hand wieder einschalten.
+# Pausiert Supabase doch einmal: Dashboard → Resume project (Daten bleiben erhalten).
 permissions:
   contents: read
-  # Nur für „sich selbst wieder aktivieren“ (siehe unten)
-  actions: write
 
 jobs:
   ping:
@@ -36,12 +38,3 @@ jobs:
             exit 1
           fi
           echo "Herzschlag geschrieben: $beat"
-      # GitHub schaltet geplante Workflows in öffentlichen Repos nach 60 Tagen ohne Commit ab.
-      # Über die offizielle Schnittstelle wieder aktivieren (keine Schein-Commits). Ob das die
-      # Frist zurücksetzt, ist nicht dokumentiert – schadet aber nicht. Fehler hier ignorieren.
-      - name: Workflow aktiv halten
-        if: always()
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow enable keepalive.yml --repo "$GITHUB_REPOSITORY"
