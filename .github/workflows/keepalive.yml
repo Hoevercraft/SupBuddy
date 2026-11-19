@@ -1,10 +1,11 @@
 name: Supabase wach halten
 
-# Gratis-Projekte pausiert Supabase nach einer Woche ohne Zugriff.
-# Alle 3 Tage ein harmloser Aufruf (Funktion ping, nur mit dem öffentlichen Schlüssel).
+# Gratis-Projekte pausiert Supabase nach einer Woche mit zu wenig Datenbank-Aktivität.
+# Täglich ein Aufruf der Funktion ping (nur mit dem öffentlichen Schlüssel). Sie schreibt
+# einen Zeitstempel in die Datenbank – ein reines Lesen hat im Nov. 2026 nicht gereicht.
 on:
   schedule:
-    - cron: '23 5 */3 * *'
+    - cron: '23 5 * * *'
   workflow_dispatch:
 
 permissions:
@@ -18,12 +19,23 @@ jobs:
     steps:
       - name: Ping
         run: |
-          code=$(curl -s -o /tmp/out.txt -w '%{http_code}' -X POST \
+          code=$(curl -s -m 30 -o /tmp/out.txt -w '%{http_code}' -X POST \
             -H "apikey: sb_publishable_k5lTVxYFROnQEBCDw0B4DQ_ZJNpmKcw" \
             -H "Content-Type: application/json" -d '{}' \
-            https://uldwwhedugbygaukjkly.supabase.co/rest/v1/rpc/ping)
+            https://uldwwhedugbygaukjkly.supabase.co/rest/v1/rpc/ping) || true
           cat /tmp/out.txt; echo
-          test "$code" = "200"
+          if [ "$code" != "200" ]; then
+            echo "::error::Supabase antwortet mit HTTP $code (000 = Adresse nicht erreichbar, Projekt evtl. pausiert)"
+            exit 1
+          fi
+          # Antwort ist der gerade geschriebene Zeitstempel, z. B. "2026-11-19T05:23:04Z"
+          beat=$(tr -d '"' < /tmp/out.txt)
+          age=$(( $(date -u +%s) - $(date -u -d "$beat" +%s 2>/dev/null || echo 0) ))
+          if [ "$age" -lt 0 ] || [ "$age" -gt 300 ]; then
+            echo "::error::ping hat keinen frischen Zeitstempel geschrieben (Antwort: $beat). Schema in supabase/schema.sql aktuell?"
+            exit 1
+          fi
+          echo "Herzschlag geschrieben: $beat"
       # GitHub schaltet geplante Workflows in öffentlichen Repos nach 60 Tagen ohne Commit ab.
       # Über die offizielle Schnittstelle wieder aktivieren (keine Schein-Commits). Ob das die
       # Frist zurücksetzt, ist nicht dokumentiert – schadet aber nicht. Fehler hier ignorieren.
