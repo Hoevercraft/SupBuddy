@@ -114,12 +114,34 @@ end;
 $$;
 
 -- Lebenszeichen für den automatischen Weckruf (verhindert die Pause des Gratis-Projekts)
+-- Ein reines „select 'ok'“ reicht nicht: Supabase zählt nur echte Datenbank-Aktivität
+-- (Projekt wurde im Nov. 2026 trotz Ping pausiert). Deshalb schreibt ping() bei jedem Aufruf
+-- den Zeitpunkt in eine Tabelle mit genau einer Zeile und gibt ihn zurück (UTC, ISO 8601).
+-- Der Workflow prüft, dass dieser Zeitpunkt frisch ist. Die Tabelle ist wie die anderen
+-- nicht veröffentlicht; nur ping() schreibt hinein (security definer).
+create table if not exists supbuddy_private.heartbeat (
+  id boolean primary key default true check (id),
+  beat_at timestamptz not null default now()
+);
+alter table supbuddy_private.heartbeat enable row level security;
+revoke all on supbuddy_private.heartbeat from public, anon, authenticated;
+
 create or replace function public.ping()
 returns text
-language sql
-stable
+language plpgsql
+volatile
+security definer
 set search_path = ''
-as $$ select 'ok'::text $$;
+as $$
+declare
+  t timestamptz;
+begin
+  insert into supbuddy_private.heartbeat (id, beat_at) values (true, now())
+  on conflict (id) do update set beat_at = excluded.beat_at
+  returning beat_at into t;
+  return to_char(t at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"');
+end;
+$$;
 
 -- Rechte: Funktionen standardmäßig für niemanden, dann gezielt freigeben
 revoke execute on function public.add_sighting(text, text, integer, timestamptz) from public, anon, authenticated;
